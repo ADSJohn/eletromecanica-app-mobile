@@ -1,7 +1,7 @@
 import React from "react";
 import { View, Text, StyleSheet } from "react-native";
 import { LineChart } from "react-native-gifted-charts";
-import { preverFalha } from "../utils/predicaoFalha";
+import { predicaoML } from "../utils/predicaoML";
 
 interface Props {
   titulo: string;
@@ -42,15 +42,8 @@ export default function SensorCard({
 
   const dados = gerarDadosComTempo(valores);
 
-  const linhaIdeal = dados.map((d) => ({
-    value: limiteIdeal,
-    label: d.label,
-  }));
-
-  const linhaCritica = dados.map((d) => ({
-    value: limiteCritico,
-    label: d.label,
-  }));
+  const linhaIdeal = dados.map((d) => ({ value: limiteIdeal }));
+  const linhaCritica = dados.map((d) => ({ value: limiteCritico }));
 
   const status =
     atual >= limiteCritico
@@ -59,7 +52,7 @@ export default function SensorCard({
       ? "ALERTA"
       : "NORMAL";
 
-  const predicao = preverFalha(valores);
+  const predicao = predicaoML(valores, limiteCritico);
 
   return (
     <View style={styles.card}>
@@ -94,14 +87,11 @@ export default function SensorCard({
         color="#22c55e"
         color1="#facc15"
         color2="#ef4444"
-        hideDataPoints={false}
-        dataPointsRadius={4}
         showValuesAsDataPointsText
-        dataPointsTextStyle={{ color: "#fff", fontSize: 10 }}
+        dataPointsRadius={4}
         xAxisLabelTextStyle={{ color: "#94a3b8", fontSize: 10 }}
         yAxisTextStyle={{ color: "#94a3b8", fontSize: 10 }}
         rulesColor="#1e293b"
-        noOfSections={4}
       />
 
       <View style={styles.legenda}>
@@ -110,7 +100,20 @@ export default function SensorCard({
         <Text style={styles.legendaTexto}>🔴 Limite Crítico</Text>
       </View>
 
-      {predicao && <Text style={styles.predicao}>🧠 {predicao.mensagem}</Text>}
+      {predicao && (
+        <Text
+          style={[
+            styles.predicao,
+            predicao.risco === "CRÍTICO"
+              ? styles.critico
+              : predicao.risco === "ALTO"
+              ? styles.alerta
+              : styles.normal,
+          ]}
+        >
+          🧠 {predicao.mensagem}
+        </Text>
+      )}
     </View>
   );
 }
@@ -120,38 +123,21 @@ const styles = StyleSheet.create({
     backgroundColor: "#020617",
     borderRadius: 12,
     padding: 12,
-    marginBottom: 18,
+    marginBottom: 16,
     borderWidth: 1,
     borderColor: "#1e293b",
   },
-  title: {
-    color: "#fff",
-    fontWeight: "bold",
-    fontSize: 16,
-  },
-  valorAtual: {
-    color: "#38bdf8",
-    marginVertical: 4,
-  },
-  status: {
-    marginBottom: 8,
-    fontWeight: "bold",
-  },
+  title: { color: "#fff", fontWeight: "bold", fontSize: 16 },
+  valorAtual: { color: "#38bdf8", marginVertical: 4 },
+  status: { fontWeight: "bold", marginBottom: 6 },
   normal: { color: "#22c55e" },
   alerta: { color: "#facc15" },
   critico: { color: "#ef4444" },
   legenda: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: 8,
+    marginTop: 6,
   },
-  legendaTexto: {
-    color: "#94a3b8",
-    fontSize: 12,
-  },
-  predicao: {
-    color: "#fb7185",
-    marginTop: 8,
-    fontWeight: "bold",
-  },
+  legendaTexto: { color: "#94a3b8", fontSize: 12 },
+  predicao: { marginTop: 8, fontWeight: "bold" },
 });
