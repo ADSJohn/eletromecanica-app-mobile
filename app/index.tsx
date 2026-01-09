@@ -1,20 +1,11 @@
 import React from "react";
-import { StatusBar } from "expo-status-bar";
-import { SafeAreaView, StyleSheet } from "react-native";
-import Dashboard from "../app/src/screens/Dashboard";
+import Dashboard from "./src/screens/Dashboard";
+import { AlertProvider } from "./src/context/AlertContext";
 
-export default function App() {
+export default function Index() {
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar style="dark" />
+    <AlertProvider>
       <Dashboard />
-    </SafeAreaView>
+    </AlertProvider>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#f2f4f7",
-  },
-});
