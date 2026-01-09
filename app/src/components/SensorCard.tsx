@@ -1,9 +1,11 @@
 import React from "react";
 import { View, Text, StyleSheet } from "react-native";
 import { LineChart } from "react-native-gifted-charts";
+import { colors } from "../theme/colors";
 
 interface Props {
   titulo: string;
+  unidade: string;
   valores?: number[];
   limiteIdeal: number;
   limiteCritico: number;
@@ -11,45 +13,47 @@ interface Props {
 
 export default function SensorCard({
   titulo,
+  unidade,
   valores = [],
   limiteIdeal,
   limiteCritico,
 }: Props) {
   const valorAtual = valores.length > 0 ? valores[valores.length - 1] : 0;
 
-  let status = "OK";
-  let cor = "#2ecc71";
+  let status = "NORMAL";
+  let cor = colors.success;
 
   if (valorAtual > limiteCritico) {
     status = "CRÍTICO";
-    cor = "#e74c3c";
+    cor = colors.danger;
   } else if (valorAtual > limiteIdeal) {
     status = "ALERTA";
-    cor = "#f39c12";
+    cor = colors.warning;
   }
 
-  const dadosGrafico = valores.map((v) => ({
-    value: v,
-  }));
+  const data = valores.map((v) => ({ value: v }));
 
   return (
     <View style={styles.card}>
       <Text style={styles.titulo}>{titulo}</Text>
 
-      <Text style={[styles.status, { color: cor }]}>
-        {status} — {valorAtual}
+      <Text style={[styles.valor, { color: cor }]}>
+        {valorAtual.toFixed(1)} {unidade}
       </Text>
 
-      {dadosGrafico.length > 0 && (
+      <Text style={[styles.status, { color: cor }]}>{status}</Text>
+
+      {data.length > 1 && (
         <LineChart
-          data={dadosGrafico}
-          height={160}
+          data={data}
+          height={140}
           thickness={2}
           color={cor}
           hideDataPoints
-          spacing={20}
+          spacing={22}
           yAxisThickness={0}
           xAxisThickness={0}
+          rulesColor="#1e293b"
         />
       )}
     </View>
@@ -58,19 +62,24 @@ export default function SensorCard({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: "#1e1e1e",
-    borderRadius: 12,
+    backgroundColor: colors.card,
+    borderRadius: 14,
     padding: 16,
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#1e293b",
   },
   titulo: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
+    color: colors.muted,
+    fontSize: 14,
     marginBottom: 6,
   },
+  valor: {
+    fontSize: 26,
+    fontWeight: "bold",
+  },
   status: {
-    fontSize: 14,
+    fontSize: 12,
     marginBottom: 12,
   },
 });
