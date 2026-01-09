@@ -2,11 +2,14 @@ import { Audio } from "expo-av";
 
 let sound: Audio.Sound | null = null;
 
-export async function playAlarm(volume: number) {
+export async function startAlarm(volume: number) {
   if (sound) return;
 
   sound = new Audio.Sound();
-  await sound.loadAsync(require("../../assets/alarm.mp3"), { volume });
+  await sound.loadAsync(require("../../assets/alarm.mp3"), {
+    isLooping: true,
+    volume,
+  });
 
   await sound.playAsync();
 }

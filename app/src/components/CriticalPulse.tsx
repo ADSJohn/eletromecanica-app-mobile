@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { Animated, View, StyleSheet } from "react-native";
+import { Animated, StyleSheet } from "react-native";
 
 export default function CriticalPulse({ ativo }: { ativo: boolean }) {
   const scale = useRef(new Animated.Value(1)).current;

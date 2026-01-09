@@ -1,9 +1,9 @@
 import React, { useEffect } from "react";
 import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { LineChart } from "react-native-gifted-charts";
-import { colors } from "../theme/colors";
-import { playAlarm, stopAlarm } from "../services/alarmSound";
+import { startAlarm, stopAlarm } from "../services/alarmSound";
 import { diagnostico } from "../utils/diagnostico";
+import { gerarTempo } from "../utils/timeLabels";
 import { useAlert } from "../context/AlertContext";
 import CriticalPulse from "./CriticalPulse";
 
@@ -18,25 +18,28 @@ export default function SensorCard({
   const { acknowledged, setAcknowledged } = useAlert();
 
   let status = "NORMAL";
-  let cor = colors.success;
+  let cor = "#22c55e";
   let icone = "🟢";
   let volume = 0;
 
   if (valorAtual > limiteCritico) {
     status = "CRÍTICO";
-    cor = colors.danger;
+    cor = "#ef4444";
     icone = "🔴";
-    volume = 1.0;
+    volume = 1;
   } else if (valorAtual > limiteIdeal) {
     status = "ALERTA";
-    cor = colors.warning;
+    cor = "#facc15";
     icone = "🟡";
     volume = 0.4;
   }
 
   useEffect(() => {
-    if (status === "CRÍTICO" && !acknowledged) playAlarm(volume);
-    else stopAlarm();
+    if (status === "CRÍTICO" && !acknowledged) {
+      startAlarm(volume);
+    } else {
+      stopAlarm();
+    }
   }, [status, acknowledged]);
 
   return (
@@ -55,25 +58,30 @@ export default function SensorCard({
       <Text style={{ color: cor }}>{status}</Text>
 
       <LineChart
-        data={valores.map((v: number) => ({ value: v }))}
-        height={120}
+        data={valores.map((v: number, i: number) => ({
+          value: v,
+          label: gerarTempo(i, valores.length),
+        }))}
+        height={140}
+        thickness={2}
         color={cor}
-        hideDataPoints
-        yAxisThickness={0}
-        xAxisThickness={0}
+        hideDataPoints={false}
+        spacing={42}
+        yAxisThickness={1}
+        xAxisThickness={1}
       />
 
       {status === "CRÍTICO" && (
         <>
           <Text style={styles.diagnostico}>
-            🧠 {diagnostico(titulo.split(" ")[0], valorAtual)}
+            🧠 {diagnostico(titulo, valorAtual)}
           </Text>
 
           <TouchableOpacity
             style={styles.ack}
             onPress={() => setAcknowledged(true)}
           >
-            <Text style={{ color: "#fff" }}>🔇 ACKNOWLEDGE</Text>
+            <Text style={{ color: "#fff" }}>🔇 PAUSAR ALARME</Text>
           </TouchableOpacity>
         </>
       )}
@@ -83,7 +91,7 @@ export default function SensorCard({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.card,
+    backgroundColor: "#020617",
     borderRadius: 14,
     padding: 16,
     borderWidth: 2,
@@ -93,7 +101,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   titulo: {
-    color: colors.text,
+    color: "#e5e7eb",
     fontSize: 14,
   },
   valor: {
@@ -102,7 +110,7 @@ const styles = StyleSheet.create({
     marginVertical: 6,
   },
   diagnostico: {
-    color: colors.muted,
+    color: "#94a3b8",
     fontSize: 12,
     marginTop: 6,
   },
