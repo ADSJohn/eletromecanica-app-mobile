@@ -1,9 +1,17 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Dimensions } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Pressable,
+  Dimensions,
+} from "react-native";
 import Svg, { Polyline, Line, Text as SvgText } from "react-native-svg";
 import { Client, Message } from "paho-mqtt";
+import { startAlarm, stopAlarm } from "../services/alarmSound";
 
-/* ================= CONFIGURAÇÕES ================= */
+/* ================= CONFIG ================= */
 
 const { width } = Dimensions.get("window");
 
@@ -17,14 +25,19 @@ const OFFSET_Y = 10;
 const TEMP_IDEAL = 20;
 const TEMP_MIN = 0;
 const TEMP_MAX = 120;
+const TEMP_CRITICA = 85;
 
-/* ================= COMPONENTE ================= */
+/* ================= COMPONENT ================= */
 
 export default function Dashboard() {
   const [tempSeries, setTempSeries] = useState<number[]>([]);
   const [fftVib, setFftVib] = useState<number[]>([]);
   const [fftDes, setFftDes] = useState<number[]>([]);
   const [status, setStatus] = useState("🔴 Desconectado");
+
+  const [alerta, setAlerta] = useState<string | null>(null);
+  const [alarmeAtivo, setAlarmeAtivo] = useState(false);
+  const [alarmeAck, setAlarmeAck] = useState(false);
 
   /* ================= MQTT ================= */
 
@@ -39,14 +52,31 @@ export default function Dashboard() {
     client.onMessageArrived = (msg: Message) => {
       const data = JSON.parse(msg.payloadString);
 
+      // TEMPERATURA
       if (data.temp !== undefined) {
         setTempSeries((t) => [...t.slice(-60), Number(data.temp)]);
+
+        if (data.temp > TEMP_CRITICA && !alarmeAtivo && !alarmeAck) {
+          setAlerta("Temperatura acima do limite crítico");
+          setAlarmeAtivo(true);
+          startAlarm();
+        }
       }
 
+      // FFT
       if (Array.isArray(data.fft)) {
         if (msg.destinationName.includes("vibracao")) setFftVib(data.fft);
         if (msg.destinationName.includes("desbalanceamento"))
           setFftDes(data.fft);
+      }
+
+      // ALERTA DO BACKEND
+      if (msg.destinationName.includes("alerta")) {
+        if (!alarmeAtivo && !alarmeAck) {
+          setAlerta(data.mensagem);
+          setAlarmeAtivo(true);
+          startAlarm();
+        }
       }
     };
 
@@ -57,13 +87,22 @@ export default function Dashboard() {
         client.subscribe("eletromecanica/motor/raw");
         client.subscribe("eletromecanica/motor/fft/vibracao");
         client.subscribe("eletromecanica/motor/fft/desbalanceamento");
+        client.subscribe("eletromecanica/motor/alerta");
       },
     });
 
     return () => client.disconnect();
-  }, []);
+  }, [alarmeAtivo, alarmeAck]);
 
-  /* ================= EIXOS ================= */
+  /* ================= RESET ACK ================= */
+  useEffect(() => {
+    const t = tempSeries[tempSeries.length - 1];
+    if (t !== undefined && t < TEMP_CRITICA) {
+      setAlarmeAck(false);
+    }
+  }, [tempSeries]);
+
+  /* ================= AXES ================= */
 
   const Axes = ({
     yLabels,
@@ -75,7 +114,6 @@ export default function Dashboard() {
     yLabel: string;
   }) => (
     <>
-      {/* eixo Y */}
       <Line
         x1={OFFSET_X}
         y1={OFFSET_Y}
@@ -83,8 +121,6 @@ export default function Dashboard() {
         y2={GRAPH_HEIGHT + OFFSET_Y}
         stroke="#475569"
       />
-
-      {/* eixo X */}
       <Line
         x1={OFFSET_X}
         y1={GRAPH_HEIGHT + OFFSET_Y}
@@ -93,7 +129,6 @@ export default function Dashboard() {
         stroke="#475569"
       />
 
-      {/* valores eixo Y */}
       {yLabels.map((l, i) => {
         const y =
           OFFSET_Y + GRAPH_HEIGHT - (i / (yLabels.length - 1)) * GRAPH_HEIGHT;
@@ -112,7 +147,6 @@ export default function Dashboard() {
         );
       })}
 
-      {/* label eixo X */}
       <SvgText
         x={OFFSET_X + GRAPH_WIDTH / 2}
         y={GRAPH_HEIGHT + OFFSET_Y + 28}
@@ -123,7 +157,6 @@ export default function Dashboard() {
         {xLabel}
       </SvgText>
 
-      {/* label eixo Y */}
       <SvgText
         x={12}
         y={OFFSET_Y + GRAPH_HEIGHT / 2}
@@ -137,21 +170,19 @@ export default function Dashboard() {
     </>
   );
 
-  /* ================= GRÁFICO TEMPERATURA ================= */
+  /* ================= TEMP CHART ================= */
 
   const TempChart = () => {
     if (tempSeries.length < 2) return null;
 
-    const idealSeries = tempSeries.map(() => TEMP_IDEAL);
+    const ideal = tempSeries.map(() => TEMP_IDEAL);
 
     const toPoint = (v: number, i: number) => {
       const x = OFFSET_X + (i / (tempSeries.length - 1)) * GRAPH_WIDTH;
-
       const y =
         OFFSET_Y +
         GRAPH_HEIGHT -
         ((v - TEMP_MIN) / (TEMP_MAX - TEMP_MIN)) * GRAPH_HEIGHT;
-
       return `${x},${y}`;
     };
 
@@ -162,18 +193,14 @@ export default function Dashboard() {
           xLabel="Tempo"
           yLabel="°C"
         />
-
-        {/* temperatura atual */}
         <Polyline
           points={tempSeries.map(toPoint).join(" ")}
           stroke="#22c55e"
           strokeWidth={2}
           fill="none"
         />
-
-        {/* temperatura ideal (comparativa) */}
         <Polyline
-          points={idealSeries.map(toPoint).join(" ")}
+          points={ideal.map(toPoint).join(" ")}
           stroke="#ef4444"
           strokeWidth={2}
           strokeDasharray="6 4"
@@ -183,17 +210,16 @@ export default function Dashboard() {
     );
   };
 
-  /* ================= GRÁFICO FFT ================= */
+  /* ================= FFT CHART ================= */
 
-  const FFTChart = (data: number[], color: string, yLabel: string) => {
-    if (data.length < 2) return null;
+  const FFTChart = (data: number[], color: string, label: string) => {
+    if (!data || data.length < 2) return null;
 
     const max = Math.max(...data);
 
     const toPoint = (v: number, i: number) => {
       const x = OFFSET_X + (i / (data.length - 1)) * GRAPH_WIDTH;
       const y = OFFSET_Y + GRAPH_HEIGHT - (v / max) * GRAPH_HEIGHT;
-
       return `${x},${y}`;
     };
 
@@ -201,10 +227,9 @@ export default function Dashboard() {
       <Svg width={CARD_WIDTH} height={GRAPH_HEIGHT + 60}>
         <Axes
           yLabels={["0", "25%", "50%", "75%", "100%"]}
-          xLabel="Frequência (bins)"
-          yLabel={yLabel}
+          xLabel="Frequência"
+          yLabel={label}
         />
-
         <Polyline
           points={data.map(toPoint).join(" ")}
           stroke={color}
@@ -222,81 +247,50 @@ export default function Dashboard() {
       <Text style={styles.title}>⚙️ Monitoramento do Motor</Text>
       <Text style={styles.status}>{status}</Text>
 
-      {/* TEMPERATURA */}
+      {alerta && (
+        <View style={styles.alertBox}>
+          <Text style={styles.alertTitle}>🚨 ALERTA CRÍTICO</Text>
+          <Text style={styles.alertMsg}>{alerta}</Text>
+
+          <Pressable
+            style={styles.alertBtn}
+            onPress={() => {
+              stopAlarm();
+              setAlarmeAtivo(false);
+              setAlarmeAck(true);
+              setAlerta(null);
+            }}
+          >
+            <Text style={styles.alertBtnText}>PARAR ALARME</Text>
+          </Pressable>
+        </View>
+      )}
+
       <View style={styles.card}>
         <Text style={styles.label}>🌡️ Temperatura</Text>
-
-        <View style={styles.legend}>
-          <LegendItem color="#22c55e" label="Atual" />
-          <LegendItem color="#ef4444" label="Ideal" />
-        </View>
-
-        <Text style={styles.value}>
-          Atual: {tempSeries[tempSeries.length - 1]?.toFixed(1) ?? "--"} °C
-        </Text>
-
         <TempChart />
       </View>
 
-      {/* VIBRAÇÃO */}
       <View style={styles.card}>
         <Text style={styles.label}>📈 FFT Vibração</Text>
-        <Text style={styles.value}>
-          RMS:{" "}
-          {fftVib.length
-            ? Math.sqrt(
-                fftVib.reduce((s, v) => s + v * v, 0) / fftVib.length,
-              ).toFixed(2)
-            : "--"}
-        </Text>
-
         {FFTChart(fftVib, "#38bdf8", "Magnitude")}
       </View>
 
-      {/* DESBALANCEAMENTO */}
       <View style={styles.card}>
         <Text style={styles.label}>⚖️ FFT Desbalanceamento</Text>
-        <Text style={styles.value}>
-          RMS:{" "}
-          {fftDes.length
-            ? Math.sqrt(
-                fftDes.reduce((s, v) => s + v * v, 0) / fftDes.length,
-              ).toFixed(2)
-            : "--"}
-        </Text>
-
         {FFTChart(fftDes, "#facc15", "Magnitude")}
       </View>
     </ScrollView>
   );
 }
 
-/* ================= COMPONENTES AUXILIARES ================= */
-
-const LegendItem = ({ color, label }: { color: string; label: string }) => (
-  <View style={styles.legendItem}>
-    <View style={[styles.legendColor, { backgroundColor: color }]} />
-    <Text style={styles.legendText}>{label}</Text>
-  </View>
-);
-
-/* ================= ESTILOS ================= */
+/* ================= STYLES ================= */
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#020617",
-    padding: 16,
-  },
-  title: {
-    color: "#fff",
-    fontSize: 22,
-    fontWeight: "bold",
-  },
-  status: {
-    color: "#94a3b8",
-    marginBottom: 12,
-  },
+  container: { flex: 1, backgroundColor: "#020617", padding: 16 },
+  title: { color: "#fff", fontSize: 22, fontWeight: "bold" },
+  status: { color: "#94a3b8", marginBottom: 12 },
+
   card: {
     borderWidth: 1,
     borderColor: "#1e293b",
@@ -304,30 +298,22 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 8,
   },
-  label: {
-    color: "#e5e7eb",
-    fontWeight: "600",
+
+  label: { color: "#e5e7eb", fontWeight: "600", marginBottom: 6 },
+
+  alertBox: {
+    backgroundColor: "#7f1d1d",
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 16,
   },
-  value: {
-    color: "#94a3b8",
-    marginBottom: 6,
-  },
-  legend: {
-    flexDirection: "row",
-    marginBottom: 6,
-  },
-  legendItem: {
-    flexDirection: "row",
+  alertTitle: { color: "#fff", fontSize: 18, fontWeight: "bold" },
+  alertMsg: { color: "#fecaca", marginVertical: 8 },
+  alertBtn: {
+    backgroundColor: "#dc2626",
+    padding: 12,
+    borderRadius: 6,
     alignItems: "center",
-    marginRight: 12,
   },
-  legendColor: {
-    width: 12,
-    height: 12,
-    marginRight: 6,
-  },
-  legendText: {
-    color: "#cbd5f5",
-    fontSize: 12,
-  },
+  alertBtnText: { color: "#fff", fontWeight: "bold" },
 });

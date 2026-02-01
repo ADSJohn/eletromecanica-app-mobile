@@ -1,12 +1,8 @@
-export function diagnostico(sensor: string, valor: number) {
-  if (sensor.includes("Temperatura") && valor > 85)
-    return "Possível sobrecarga ou falha de lubrificação";
+export function diagnostico(tipo: string, rms: number) {
+  if (tipo === "vib" && rms > 4.5)
+    return "Vibração excessiva – possível falha em rolamento";
 
-  if (sensor.includes("Velocidade") && valor > 1650)
-    return "Inversor ou controle fora do padrão";
+  if (tipo === "des" && rms > 3.0) return "Desbalanceamento do rotor";
 
-  if (sensor.includes("Alinhamento") && valor > 2)
-    return "Desalinhamento mecânico do eixo";
-
-  return "Operação normal";
+  return "Normal";
 }
