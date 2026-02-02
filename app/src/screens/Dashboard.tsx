@@ -1,20 +1,20 @@
-import React, { useEffect, useState, useRef } from "react";
-import {
-  View,
-  Text,
-  ScrollView,
-  Pressable,
-  Dimensions,
-  Alert,
-  Platform,
-  StyleSheet,
-} from "react-native";
-import Svg, { Polyline, Line, Text as SvgText, Rect } from "react-native-svg";
-import ViewShot from "react-native-view-shot";
+import { Buffer } from "buffer";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
-import * as FileSystem from "expo-file-system/legacy";
-import { Buffer } from "buffer";
+import React, { useEffect, useRef, useState } from "react";
+import {
+  Alert,
+  Dimensions,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import Svg, { Line, Polyline, Rect, Text as SvgText } from "react-native-svg";
+import ViewShot from "react-native-view-shot";
 
 /* ================= CONFIG ================= */
 const { width } = Dimensions.get("window");
@@ -228,9 +228,11 @@ export default function Dashboard() {
     </Svg>
   );
 
+  /* ================= TEMPERATURE CHART COM PICOS ================= */
   const TempChart = () => {
     if (tempSeries.length < 2) return null;
     const ideal = tempSeries.map(() => TEMP_IDEAL);
+
     const toPoint = (v: number, i: number) => {
       const x = OFFSET_X + (i / (tempSeries.length - 1)) * GRAPH_WIDTH;
       const y =
@@ -239,6 +241,7 @@ export default function Dashboard() {
         ((v - TEMP_MIN) / (TEMP_MAX - TEMP_MIN)) * GRAPH_HEIGHT;
       return { x, y, v };
     };
+
     const points = tempSeries.map(toPoint);
     const idealPoints = ideal.map(toPoint);
     const peaks = findPeaks(tempSeries);
@@ -270,6 +273,7 @@ export default function Dashboard() {
             strokeDasharray="6 4"
             fill="none"
           />
+          {/* Valores nos picos somente no gráfico de temperatura */}
           {peaks.map((p) => {
             const pt = points[p.index];
             return (
@@ -290,6 +294,7 @@ export default function Dashboard() {
     );
   };
 
+  /* ================= FFT CHART SEM VALORES NOS PICOS ================= */
   const FFTChart = (data: number[], color: string, label: string) => {
     if (!data || data.length < 2) return null;
     const toPoint = (v: number, i: number) => {
@@ -299,7 +304,6 @@ export default function Dashboard() {
       return { x, y, v };
     };
     const points = data.map(toPoint);
-    const peaks = findPeaks(data);
 
     return (
       <View>
@@ -316,21 +320,7 @@ export default function Dashboard() {
             strokeWidth={2}
             fill="none"
           />
-          {peaks.map((p) => {
-            const pt = points[p.index];
-            return (
-              <SvgText
-                key={p.index}
-                x={pt.x}
-                y={pt.y - 5}
-                fontSize={10}
-                fill={color}
-                textAnchor="middle"
-              >
-                {pt.v.toFixed(1)}
-              </SvgText>
-            );
-          })}
+          {/* Nenhum valor nos picos */}
         </Svg>
       </View>
     );
