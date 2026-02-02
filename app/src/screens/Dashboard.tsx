@@ -106,8 +106,8 @@ export default function Dashboard() {
 
       const charts = [
         { ref: tempChartRef, label: "Temperatura" },
-        { ref: fftVibRef, label: "FFT Vibração" },
-        { ref: fftDesRef, label: "FFT Desbalanceamento" },
+        { ref: fftVibRef, label: "Vibração" },
+        { ref: fftDesRef, label: "Desbalanceamento" },
       ];
 
       for (const c of charts) {
