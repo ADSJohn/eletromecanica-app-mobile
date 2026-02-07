@@ -3,24 +3,28 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   Dimensions,
   Pressable,
   Alert,
+  SafeAreaView,
+  Platform,
+  StatusBar,
 } from "react-native";
-import Svg, { Polyline } from "react-native-svg";
+import Svg, { Polyline, Line, Text as SvgText } from "react-native-svg";
 import * as Haptics from "expo-haptics";
 import { createAudioPlayer } from "expo-audio";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 
-const { width } = Dimensions.get("window");
+/* ================= DIMENSÕES ================= */
 
-/* ================= CONFIG ================= */
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
-const CARD_RADIUS = 14;
-const GRAPH_HEIGHT = 160;
-const GRAPH_WIDTH = width - 64;
+const STATUS_BAR_HEIGHT =
+  Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0;
+
+/* ================= LIMITES ================= */
 
 const TEMP_CRITICA = 80;
 const VIB_CRITICA = 8;
@@ -37,10 +41,10 @@ export default function Dashboard() {
   const [alertaVib, setAlertaVib] = useState(false);
   const [alertaDes, setAlertaDes] = useState(false);
 
+  const [alarmeAtivo, setAlarmeAtivo] = useState(true);
+
   const vibracaoRef = useRef<NodeJS.Timeout | null>(null);
   const sireneRef = useRef<any>(null);
-
-  /* ================= SIMULAÇÃO ================= */
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -48,306 +52,348 @@ export default function Dashboard() {
       const vib = Array.from({ length: 32 }, () => Math.random() * 10);
       const des = Array.from({ length: 32 }, () => Math.random() * 6);
 
-      const picoVib = Math.max(...vib);
-      const picoDes = Math.max(...des);
-
-      setTemp((p) => [...p.slice(-25), t]);
+      setTemp((p) => [...p.slice(-5), t]);
       setFftVib(vib);
       setFftDes(des);
 
       setAlertaTemp(t > TEMP_CRITICA);
-      setAlertaVib(picoVib > VIB_CRITICA);
-      setAlertaDes(picoDes > DES_CRITICA);
+      setAlertaVib(Math.max(...vib) > VIB_CRITICA);
+      setAlertaDes(Math.max(...des) > DES_CRITICA);
 
       if (
-        (t > TEMP_CRITICA || picoVib > VIB_CRITICA || picoDes > DES_CRITICA) &&
-        !sireneRef.current
+        (t > TEMP_CRITICA ||
+          Math.max(...vib) > VIB_CRITICA ||
+          Math.max(...des) > DES_CRITICA) &&
+        alarmeAtivo
       ) {
-        iniciarAlerta();
+        iniciarAlarme();
+      } else {
+        pararAlarme();
       }
     }, 2000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [alarmeAtivo]);
 
-  /* ================= ALERTA ================= */
+  const iniciarAlarme = async () => {
+    if (!sireneRef.current) {
+      vibracaoRef.current = setInterval(() => {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      }, 1500);
 
-  const iniciarAlerta = async () => {
-    vibracaoRef.current = setInterval(() => {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-    }, 1500);
-
-    const player = createAudioPlayer(require("../../assets/alarm.mp3"));
-    player.loop = true;
-    player.play();
-    sireneRef.current = player;
+      const player = createAudioPlayer(require("../../assets/alarm.mp3"));
+      player.loop = true;
+      player.play();
+      sireneRef.current = player;
+    }
   };
 
-  const pararAlerta = () => {
-    setAlertaTemp(false);
-    setAlertaVib(false);
-    setAlertaDes(false);
-
-    if (vibracaoRef.current) {
-      clearInterval(vibracaoRef.current);
-      vibracaoRef.current = null;
-    }
-
+  const pararAlarme = () => {
+    if (vibracaoRef.current) clearInterval(vibracaoRef.current);
     if (sireneRef.current) {
       sireneRef.current.pause();
       sireneRef.current.remove();
-      sireneRef.current = null;
     }
+    vibracaoRef.current = null;
+    sireneRef.current = null;
   };
-
-  /* ================= PDF ================= */
 
   const gerarRelatorioPDF = async () => {
     try {
       const html = `
       <html>
         <body style="font-family: Arial; padding: 24px;">
-          <h2>Relatório de Monitoramento do Motor</h2>
-          <p><b>Data:</b> ${new Date().toLocaleString()}</p>
-
-          <h3>Status</h3>
-          <ul>
-            <li>Temperatura: ${temp.at(-1)?.toFixed(1)} °C</li>
-            <li>Pico Vibração FFT: ${Math.max(...fftVib).toFixed(2)}</li>
-            <li>Pico Desbalanceamento FFT: ${Math.max(...fftDes).toFixed(2)}</li>
-          </ul>
-
-          <h3>Alertas</h3>
-          <ul>
-            <li>Temperatura: ${alertaTemp ? "CRÍTICO" : "Normal"}</li>
-            <li>Vibração: ${alertaVib ? "CRÍTICO" : "Normal"}</li>
-            <li>Desbalanceamento: ${alertaDes ? "CRÍTICO" : "Normal"}</li>
-          </ul>
+          <h2>Relatório de Monitoramento</h2>
+          <p>Temperatura: ${temp.at(-1)?.toFixed(1)} °C</p>
+          <p>FFT Vibração (pico): ${Math.max(...fftVib).toFixed(2)}</p>
+          <p>FFT Desbalanceamento (pico): ${Math.max(...fftDes).toFixed(2)}</p>
         </body>
       </html>`;
       const { uri } = await Print.printToFileAsync({ html });
       await Sharing.shareAsync(uri);
     } catch {
-      Alert.alert("Erro", "Falha ao gerar PDF");
+      Alert.alert("Erro", "Falha ao gerar relatório");
     }
   };
 
-  const statusGeral =
-    alertaTemp || alertaVib || alertaDes ? "CRÍTICO" : "NORMAL";
-
-  /* ================= RENDER ================= */
-
   return (
-    <ScrollView style={styles.container}>
-      <Text style={styles.title}>Dashboard de Monitoramento</Text>
-      <Text style={styles.subtitle}>Motor Industrial • Tempo Real</Text>
+    <SafeAreaView style={styles.safe}>
+      <View style={styles.container}>
+        {/* HEADER */}
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.title}>Dashboard de Monitoramento</Text>
+            <Text style={styles.subtitle}>Motor Industrial • Tempo Real</Text>
+          </View>
 
-      {/* KPI */}
-      <View style={styles.kpiRow}>
-        <KPI
-          title="Status Geral"
-          value={statusGeral}
-          danger={statusGeral === "CRÍTICO"}
-        />
-        <KPI
-          title="Temperatura"
-          value={`${temp.at(-1)?.toFixed(1) ?? "--"} °C`}
-          danger={alertaTemp}
-        />
-      </View>
+          <View style={styles.headerBtns}>
+            <Pressable style={styles.iconBtn} onPress={gerarRelatorioPDF}>
+              <MaterialCommunityIcons
+                name="file-pdf-box"
+                size={22}
+                color="#ef4444"
+              />
+              <Text style={styles.btnTxt}>Relatório</Text>
+            </Pressable>
 
-      {/* ALERTAS */}
-      {(alertaTemp || alertaVib || alertaDes) && (
-        <View style={styles.alertBox}>
-          <Text style={styles.alertTitle}>⚠ ALERTAS ATIVOS</Text>
-          {alertaTemp && (
-            <Text style={styles.alertItem}>🔥 Temperatura alta</Text>
-          )}
-          {alertaVib && (
-            <Text style={styles.alertItem}>📈 Vibração excessiva</Text>
-          )}
-          {alertaDes && (
-            <Text style={styles.alertItem}>⚖️ Desbalanceamento detectado</Text>
-          )}
-
-          <Pressable style={styles.alertBtn} onPress={pararAlerta}>
-            <Text style={styles.alertTxt}>DESATIVAR ALERTAS</Text>
-          </Pressable>
+            <Pressable
+              style={styles.iconBtn}
+              onPress={() => {
+                setAlarmeAtivo((p) => !p);
+                pararAlarme();
+              }}
+            >
+              <MaterialCommunityIcons
+                name={alarmeAtivo ? "alarm-light" : "alarm-light-off"}
+                size={22}
+                color={alarmeAtivo ? "#22c55e" : "#94a3b8"}
+              />
+              <Text style={styles.btnTxt}>
+                {alarmeAtivo ? "Alarme ON" : "Alarme OFF"}
+              </Text>
+            </Pressable>
+          </View>
         </View>
-      )}
 
-      {/* GRÁFICOS */}
-      <Card title="Temperatura do Motor">
-        <Chart data={temp} max={100} color="#22c55e" />
-      </Card>
+        {/* KPI */}
+        <View style={styles.kpi}>
+          <Text style={styles.kpiLabel}>Temperatura Atual</Text>
+          <View style={styles.kpiRow}>
+            <Text style={[styles.kpiValue, alertaTemp && { color: "#ef4444" }]}>
+              {temp.at(-1)?.toFixed(1) ?? "--"} °C
+            </Text>
+            <StatusLed danger={alertaTemp} />
+          </View>
+        </View>
 
-      <Card title="FFT – Vibração">
-        <Chart data={fftVib} max={10} color="#38bdf8" />
-      </Card>
-
-      <Card title="FFT – Desbalanceamento">
-        <Chart data={fftDes} max={8} color="#facc15" />
-      </Card>
-
-      {/* PDF */}
-      <Pressable style={styles.pdfBtn} onPress={gerarRelatorioPDF}>
-        <Text style={styles.pdfTxt}>GERAR RELATÓRIO PDF</Text>
-      </Pressable>
-    </ScrollView>
+        {/* GRÁFICOS */}
+        <View style={styles.graphGrid}>
+          <GraphCard
+            title="FFT – Vibração"
+            data={fftVib}
+            max={10}
+            danger={alertaVib}
+            yLabel="Amplitude"
+            xLabel="Frequência"
+          />
+          <GraphCard
+            title="FFT – Desbalanceamento"
+            data={fftDes}
+            max={8}
+            danger={alertaDes}
+            yLabel="Amplitude"
+            xLabel="Frequência"
+          />
+        </View>
+      </View>
+    </SafeAreaView>
   );
 }
 
 /* ================= COMPONENTES ================= */
 
-function KPI({
-  title,
-  value,
-  danger,
-}: {
-  title: string;
-  value: string;
-  danger?: boolean;
-}) {
+function StatusLed({ danger }: { danger: boolean }) {
   return (
-    <View style={[styles.kpiCard, danger && { borderColor: "#ef4444" }]}>
-      <Text style={styles.kpiTitle}>{title}</Text>
-      <Text style={[styles.kpiValue, danger && { color: "#ef4444" }]}>
-        {value}
-      </Text>
-    </View>
+    <View style={[styles.led, danger ? styles.ledDanger : styles.ledOk]} />
   );
 }
 
-function Card({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <View style={styles.card}>
-      <Text style={styles.cardTitle}>{title}</Text>
-      {children}
-    </View>
-  );
-}
+function GraphCard({ title, data, max, danger, xLabel, yLabel }: any) {
+  const graphHeight = SCREEN_HEIGHT * 0.24;
+  const graphWidth = SCREEN_WIDTH - 32;
 
-function Chart({
-  data,
-  max,
-  color,
-}: {
-  data: number[];
-  max: number;
-  color: string;
-}) {
-  if (data.length < 2) return null;
+  const paddingLeft = 42;
+  const paddingBottom = 30;
+  const paddingTop = 10;
+  const paddingRight = 10;
+
+  if (!data || data.length < 2) return null;
 
   const points = data
-    .map((v, i) => {
-      const x = (i / (data.length - 1)) * GRAPH_WIDTH;
-      const y = GRAPH_HEIGHT - (v / max) * GRAPH_HEIGHT;
+    .map((v: number, i: number) => {
+      const x =
+        paddingLeft +
+        (i / (data.length - 1)) * (graphWidth - paddingLeft - paddingRight);
+      const y =
+        paddingTop + (1 - v / max) * (graphHeight - paddingTop - paddingBottom);
       return `${x},${y}`;
     })
     .join(" ");
 
+  const ticksY = 4;
+  const ticksX = 4;
+
   return (
-    <Svg width={GRAPH_WIDTH} height={GRAPH_HEIGHT}>
-      <Polyline points={points} stroke={color} strokeWidth={2.5} fill="none" />
-    </Svg>
+    <View style={styles.card}>
+      <View style={styles.cardHeader}>
+        <Text style={styles.cardTitle}>{title}</Text>
+        <StatusLed danger={danger} />
+      </View>
+
+      <Svg width={graphWidth} height={graphHeight}>
+        {/* EIXOS */}
+        <Line
+          x1={paddingLeft}
+          y1={paddingTop}
+          x2={paddingLeft}
+          y2={graphHeight - paddingBottom}
+          stroke="#475569"
+        />
+        <Line
+          x1={paddingLeft}
+          y1={graphHeight - paddingBottom}
+          x2={graphWidth - paddingRight}
+          y2={graphHeight - paddingBottom}
+          stroke="#475569"
+        />
+
+        {/* Y TICKS */}
+        {Array.from({ length: ticksY + 1 }).map((_, i) => {
+          const y =
+            paddingTop +
+            (i / ticksY) * (graphHeight - paddingTop - paddingBottom);
+          const value = (max * (ticksY - i)) / ticksY;
+          return (
+            <React.Fragment key={i}>
+              <Line
+                x1={paddingLeft - 4}
+                y1={y}
+                x2={paddingLeft}
+                y2={y}
+                stroke="#475569"
+              />
+              <SvgText
+                x={paddingLeft - 8}
+                y={y + 4}
+                fontSize="10"
+                fill="#94a3b8"
+                textAnchor="end"
+              >
+                {value.toFixed(0)}
+              </SvgText>
+            </React.Fragment>
+          );
+        })}
+
+        {/* X TICKS */}
+        {Array.from({ length: ticksX + 1 }).map((_, i) => {
+          const x =
+            paddingLeft +
+            (i / ticksX) * (graphWidth - paddingLeft - paddingRight);
+          return (
+            <SvgText
+              key={i}
+              x={x}
+              y={graphHeight - paddingBottom + 14}
+              fontSize="10"
+              fill="#94a3b8"
+              textAnchor="middle"
+            >
+              {Math.round((data.length * i) / ticksX)}
+            </SvgText>
+          );
+        })}
+
+        {/* LINHA */}
+        <Polyline
+          points={points}
+          stroke={danger ? "#ef4444" : "#38bdf8"}
+          strokeWidth={2.5}
+          fill="none"
+        />
+
+        {/* LEGENDAS */}
+        <SvgText
+          x={graphWidth / 2}
+          y={graphHeight - 4}
+          fontSize="10"
+          fill="#94a3b8"
+          textAnchor="middle"
+        >
+          {xLabel}
+        </SvgText>
+
+        <SvgText
+          x={12}
+          y={graphHeight / 2}
+          fontSize="10"
+          fill="#94a3b8"
+          textAnchor="middle"
+          rotation="-90"
+          origin={`12,${graphHeight / 2}`}
+        >
+          {yLabel}
+        </SvgText>
+      </Svg>
+    </View>
   );
 }
 
 /* ================= STYLES ================= */
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 20,
-    backgroundColor: "#020617",
+  safe: { flex: 1, backgroundColor: "#020617" },
+  container: { flex: 1, paddingHorizontal: 14 },
+
+  header: {
+    marginTop: STATUS_BAR_HEIGHT,
+    height: 64,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
-  title: {
-    color: "#fff",
-    fontSize: 24,
-    fontWeight: "bold",
+
+  headerBtns: { flexDirection: "row", gap: 14 },
+
+  title: { color: "#fff", fontSize: 18, fontWeight: "bold" },
+  subtitle: { color: "#94a3b8", fontSize: 12 },
+
+  iconBtn: { alignItems: "center" },
+  btnTxt: { fontSize: 10, color: "#e5e7eb" },
+
+  kpi: {
+    marginVertical: 8,
+    backgroundColor: "#0f172a",
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#1e293b",
   },
-  subtitle: {
-    color: "#94a3b8",
-    marginBottom: 20,
-  },
+
+  kpiLabel: { color: "#94a3b8", fontSize: 12 },
+
   kpiRow: {
     flexDirection: "row",
-    gap: 12,
-    marginBottom: 16,
+    justifyContent: "space-between",
+    alignItems: "center",
   },
-  kpiCard: {
+
+  kpiValue: {
+    fontSize: 30,
+    fontWeight: "bold",
+    color: "#22c55e",
+  },
+
+  graphGrid: { flex: 1, gap: 8 },
+
+  card: {
     flex: 1,
     backgroundColor: "#0f172a",
-    borderRadius: CARD_RADIUS,
-    padding: 16,
+    borderRadius: 14,
+    padding: 10,
     borderWidth: 1,
     borderColor: "#1e293b",
   },
-  kpiTitle: {
-    color: "#94a3b8",
-    fontSize: 12,
-  },
-  kpiValue: {
-    color: "#22c55e",
-    fontSize: 22,
-    fontWeight: "bold",
-    marginTop: 4,
-  },
-  alertBox: {
-    backgroundColor: "#7f1d1d",
-    padding: 16,
-    borderRadius: CARD_RADIUS,
-    marginBottom: 16,
-  },
-  alertTitle: {
-    color: "#fecaca",
-    fontWeight: "bold",
-    marginBottom: 6,
-  },
-  alertItem: {
-    color: "#fecaca",
+
+  cardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
     marginBottom: 4,
   },
-  alertBtn: {
-    backgroundColor: "#dc2626",
-    padding: 10,
-    borderRadius: 8,
-    alignItems: "center",
-    marginTop: 10,
-  },
-  alertTxt: {
-    color: "#fff",
-    fontWeight: "bold",
-  },
-  card: {
-    backgroundColor: "#0f172a",
-    borderRadius: CARD_RADIUS,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: "#1e293b",
-  },
-  cardTitle: {
-    color: "#e5e7eb",
-    fontWeight: "600",
-    marginBottom: 8,
-  },
-  pdfBtn: {
-    backgroundColor: "#2563eb",
-    padding: 16,
-    borderRadius: CARD_RADIUS,
-    alignItems: "center",
-    marginVertical: 24,
-  },
-  pdfTxt: {
-    color: "#fff",
-    fontWeight: "bold",
-    fontSize: 16,
-  },
+
+  cardTitle: { color: "#e5e7eb", fontWeight: "600" },
+
+  led: { borderRadius: 50 },
+  ledOk: { width: 10, height: 10, backgroundColor: "#22c55e" },
+  ledDanger: { width: 16, height: 16, backgroundColor: "#ef4444" },
 });
