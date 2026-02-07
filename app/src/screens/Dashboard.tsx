@@ -21,7 +21,10 @@ const { width } = Dimensions.get("window");
 const CARD_RADIUS = 14;
 const GRAPH_HEIGHT = 160;
 const GRAPH_WIDTH = width - 64;
+
 const TEMP_CRITICA = 80;
+const VIB_CRITICA = 8;
+const DES_CRITICA = 5;
 
 /* ================= DASHBOARD ================= */
 
@@ -29,7 +32,10 @@ export default function Dashboard() {
   const [temp, setTemp] = useState<number[]>([]);
   const [fftVib, setFftVib] = useState<number[]>([]);
   const [fftDes, setFftDes] = useState<number[]>([]);
-  const [alerta, setAlerta] = useState<string | null>(null);
+
+  const [alertaTemp, setAlertaTemp] = useState(false);
+  const [alertaVib, setAlertaVib] = useState(false);
+  const [alertaDes, setAlertaDes] = useState(false);
 
   const vibracaoRef = useRef<NodeJS.Timeout | null>(null);
   const sireneRef = useRef<any>(null);
@@ -42,23 +48,31 @@ export default function Dashboard() {
       const vib = Array.from({ length: 32 }, () => Math.random() * 10);
       const des = Array.from({ length: 32 }, () => Math.random() * 6);
 
+      const picoVib = Math.max(...vib);
+      const picoDes = Math.max(...des);
+
       setTemp((p) => [...p.slice(-25), t]);
       setFftVib(vib);
       setFftDes(des);
 
-      if (t > TEMP_CRITICA && !alerta) {
-        iniciarAlerta(t);
+      setAlertaTemp(t > TEMP_CRITICA);
+      setAlertaVib(picoVib > VIB_CRITICA);
+      setAlertaDes(picoDes > DES_CRITICA);
+
+      if (
+        (t > TEMP_CRITICA || picoVib > VIB_CRITICA || picoDes > DES_CRITICA) &&
+        !sireneRef.current
+      ) {
+        iniciarAlerta();
       }
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [alerta]);
+  }, []);
 
   /* ================= ALERTA ================= */
 
-  const iniciarAlerta = async (t: number) => {
-    setAlerta(`ALERTA CRÍTICO — ${t.toFixed(1)} °C`);
-
+  const iniciarAlerta = async () => {
     vibracaoRef.current = setInterval(() => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }, 1500);
@@ -70,14 +84,18 @@ export default function Dashboard() {
   };
 
   const pararAlerta = () => {
-    setAlerta(null);
+    setAlertaTemp(false);
+    setAlertaVib(false);
+    setAlertaDes(false);
 
     if (vibracaoRef.current) {
       clearInterval(vibracaoRef.current);
       vibracaoRef.current = null;
     }
+
     if (sireneRef.current) {
-      sireneRef.current.stop();
+      sireneRef.current.pause();
+      sireneRef.current.remove();
       sireneRef.current = null;
     }
   };
@@ -91,16 +109,20 @@ export default function Dashboard() {
         <body style="font-family: Arial; padding: 24px;">
           <h2>Relatório de Monitoramento do Motor</h2>
           <p><b>Data:</b> ${new Date().toLocaleString()}</p>
+
+          <h3>Status</h3>
           <ul>
-            <li>Temperatura atual: ${temp.at(-1)?.toFixed(1)} °C</li>
-            <li>Pico FFT Vibração: ${Math.max(...fftVib).toFixed(2)}</li>
-            <li>Pico FFT Desbalanceamento: ${Math.max(...fftDes).toFixed(2)}</li>
+            <li>Temperatura: ${temp.at(-1)?.toFixed(1)} °C</li>
+            <li>Pico Vibração FFT: ${Math.max(...fftVib).toFixed(2)}</li>
+            <li>Pico Desbalanceamento FFT: ${Math.max(...fftDes).toFixed(2)}</li>
           </ul>
-          ${
-            alerta
-              ? `<p style="color:red;"><b>${alerta}</b></p>`
-              : "<p>Status normal</p>"
-          }
+
+          <h3>Alertas</h3>
+          <ul>
+            <li>Temperatura: ${alertaTemp ? "CRÍTICO" : "Normal"}</li>
+            <li>Vibração: ${alertaVib ? "CRÍTICO" : "Normal"}</li>
+            <li>Desbalanceamento: ${alertaDes ? "CRÍTICO" : "Normal"}</li>
+          </ul>
         </body>
       </html>`;
       const { uri } = await Print.printToFileAsync({ html });
@@ -110,34 +132,46 @@ export default function Dashboard() {
     }
   };
 
+  const statusGeral =
+    alertaTemp || alertaVib || alertaDes ? "CRÍTICO" : "NORMAL";
+
   /* ================= RENDER ================= */
 
   return (
     <ScrollView style={styles.container}>
-      {/* HEADER */}
       <Text style={styles.title}>Dashboard de Monitoramento</Text>
-      <Text style={styles.subtitle}>Motor Industrial • Tempo real</Text>
+      <Text style={styles.subtitle}>Motor Industrial • Tempo Real</Text>
 
       {/* KPI */}
       <View style={styles.kpiRow}>
         <KPI
-          title="Temperatura"
-          value={`${temp.at(-1)?.toFixed(1) ?? "--"} °C`}
-          danger={temp.at(-1)! > TEMP_CRITICA}
+          title="Status Geral"
+          value={statusGeral}
+          danger={statusGeral === "CRÍTICO"}
         />
         <KPI
-          title="Status"
-          value={alerta ? "CRÍTICO" : "NORMAL"}
-          danger={!!alerta}
+          title="Temperatura"
+          value={`${temp.at(-1)?.toFixed(1) ?? "--"} °C`}
+          danger={alertaTemp}
         />
       </View>
 
-      {/* ALERTA */}
-      {alerta && (
+      {/* ALERTAS */}
+      {(alertaTemp || alertaVib || alertaDes) && (
         <View style={styles.alertBox}>
-          <Text style={styles.alertTitle}>{alerta}</Text>
+          <Text style={styles.alertTitle}>⚠ ALERTAS ATIVOS</Text>
+          {alertaTemp && (
+            <Text style={styles.alertItem}>🔥 Temperatura alta</Text>
+          )}
+          {alertaVib && (
+            <Text style={styles.alertItem}>📈 Vibração excessiva</Text>
+          )}
+          {alertaDes && (
+            <Text style={styles.alertItem}>⚖️ Desbalanceamento detectado</Text>
+          )}
+
           <Pressable style={styles.alertBtn} onPress={pararAlerta}>
-            <Text style={styles.alertTxt}>DESATIVAR ALERTA</Text>
+            <Text style={styles.alertTxt}>DESATIVAR ALERTAS</Text>
           </Pressable>
         </View>
       )}
@@ -147,11 +181,11 @@ export default function Dashboard() {
         <Chart data={temp} max={100} color="#22c55e" />
       </Card>
 
-      <Card title="Espectro FFT - Vibração">
+      <Card title="FFT – Vibração">
         <Chart data={fftVib} max={10} color="#38bdf8" />
       </Card>
 
-      <Card title="Espectro FFT - Desbalanceamento">
+      <Card title="FFT – Desbalanceamento">
         <Chart data={fftDes} max={8} color="#facc15" />
       </Card>
 
@@ -274,13 +308,18 @@ const styles = StyleSheet.create({
   alertTitle: {
     color: "#fecaca",
     fontWeight: "bold",
-    marginBottom: 10,
+    marginBottom: 6,
+  },
+  alertItem: {
+    color: "#fecaca",
+    marginBottom: 4,
   },
   alertBtn: {
     backgroundColor: "#dc2626",
     padding: 10,
     borderRadius: 8,
     alignItems: "center",
+    marginTop: 10,
   },
   alertTxt: {
     color: "#fff",
