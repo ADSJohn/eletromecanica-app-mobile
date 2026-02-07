@@ -18,8 +18,9 @@ const { width } = Dimensions.get("window");
 
 /* ================= CONFIG ================= */
 
-const GRAPH_WIDTH = width - 32;
+const CARD_RADIUS = 14;
 const GRAPH_HEIGHT = 160;
+const GRAPH_WIDTH = width - 64;
 const TEMP_CRITICA = 80;
 
 /* ================= DASHBOARD ================= */
@@ -41,7 +42,7 @@ export default function Dashboard() {
       const vib = Array.from({ length: 32 }, () => Math.random() * 10);
       const des = Array.from({ length: 32 }, () => Math.random() * 6);
 
-      setTemp((p) => [...p.slice(-20), t]);
+      setTemp((p) => [...p.slice(-25), t]);
       setFftVib(vib);
       setFftDes(des);
 
@@ -56,7 +57,7 @@ export default function Dashboard() {
   /* ================= ALERTA ================= */
 
   const iniciarAlerta = async (t: number) => {
-    setAlerta(`⚠ ALERTA CRÍTICO — ${t.toFixed(1)} °C`);
+    setAlerta(`ALERTA CRÍTICO — ${t.toFixed(1)} °C`);
 
     vibracaoRef.current = setInterval(() => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -75,14 +76,13 @@ export default function Dashboard() {
       clearInterval(vibracaoRef.current);
       vibracaoRef.current = null;
     }
-
     if (sireneRef.current) {
       sireneRef.current.stop();
       sireneRef.current = null;
     }
   };
 
-  /* ================= PDF (FORMA CORRETA) ================= */
+  /* ================= PDF ================= */
 
   const gerarRelatorioPDF = async () => {
     try {
@@ -91,36 +91,22 @@ export default function Dashboard() {
         <body style="font-family: Arial; padding: 24px;">
           <h2>Relatório de Monitoramento do Motor</h2>
           <p><b>Data:</b> ${new Date().toLocaleString()}</p>
-
-          <h3>Resumo Técnico</h3>
           <ul>
-            <li>Temperatura atual: ${temp[temp.length - 1]?.toFixed(1)} °C</li>
+            <li>Temperatura atual: ${temp.at(-1)?.toFixed(1)} °C</li>
             <li>Pico FFT Vibração: ${Math.max(...fftVib).toFixed(2)}</li>
             <li>Pico FFT Desbalanceamento: ${Math.max(...fftDes).toFixed(2)}</li>
           </ul>
-
           ${
             alerta
-              ? `<h3 style="color:red;">Alerta Detectado</h3><p>${alerta}</p>`
-              : "<p>Nenhum alerta crítico registrado.</p>"
+              ? `<p style="color:red;"><b>${alerta}</b></p>`
+              : "<p>Status normal</p>"
           }
-
-          <hr />
-          <p style="font-size:12px;">
-            Relatório gerado automaticamente pelo sistema de monitoramento.
-          </p>
         </body>
-      </html>
-      `;
-
-      const { uri } = await Print.printToFileAsync({
-        html,
-      });
-
+      </html>`;
+      const { uri } = await Print.printToFileAsync({ html });
       await Sharing.shareAsync(uri);
-    } catch (err) {
-      console.error(err);
-      Alert.alert("Erro", "Falha ao gerar relatório PDF");
+    } catch {
+      Alert.alert("Erro", "Falha ao gerar PDF");
     }
   };
 
@@ -128,26 +114,48 @@ export default function Dashboard() {
 
   return (
     <ScrollView style={styles.container}>
-      <Text style={styles.title}>Monitoramento do Motor</Text>
+      {/* HEADER */}
+      <Text style={styles.title}>Dashboard de Monitoramento</Text>
+      <Text style={styles.subtitle}>Motor Industrial • Tempo real</Text>
 
+      {/* KPI */}
+      <View style={styles.kpiRow}>
+        <KPI
+          title="Temperatura"
+          value={`${temp.at(-1)?.toFixed(1) ?? "--"} °C`}
+          danger={temp.at(-1)! > TEMP_CRITICA}
+        />
+        <KPI
+          title="Status"
+          value={alerta ? "CRÍTICO" : "NORMAL"}
+          danger={!!alerta}
+        />
+      </View>
+
+      {/* ALERTA */}
       {alerta && (
         <View style={styles.alertBox}>
-          <Text style={styles.alertText}>{alerta}</Text>
-          <Pressable style={styles.stopBtn} onPress={pararAlerta}>
-            <Text style={styles.stopTxt}>PARAR ALERTA</Text>
+          <Text style={styles.alertTitle}>{alerta}</Text>
+          <Pressable style={styles.alertBtn} onPress={pararAlerta}>
+            <Text style={styles.alertTxt}>DESATIVAR ALERTA</Text>
           </Pressable>
         </View>
       )}
 
-      <Text style={styles.subtitle}>Temperatura</Text>
-      <Chart data={temp} max={100} />
+      {/* GRÁFICOS */}
+      <Card title="Temperatura do Motor">
+        <Chart data={temp} max={100} color="#22c55e" />
+      </Card>
 
-      <Text style={styles.subtitle}>FFT Vibração</Text>
-      <Chart data={fftVib} max={10} />
+      <Card title="Espectro FFT - Vibração">
+        <Chart data={fftVib} max={10} color="#38bdf8" />
+      </Card>
 
-      <Text style={styles.subtitle}>FFT Desbalanceamento</Text>
-      <Chart data={fftDes} max={8} />
+      <Card title="Espectro FFT - Desbalanceamento">
+        <Chart data={fftDes} max={8} color="#facc15" />
+      </Card>
 
+      {/* PDF */}
       <Pressable style={styles.pdfBtn} onPress={gerarRelatorioPDF}>
         <Text style={styles.pdfTxt}>GERAR RELATÓRIO PDF</Text>
       </Pressable>
@@ -155,9 +163,51 @@ export default function Dashboard() {
   );
 }
 
-/* ================= GRÁFICO ================= */
+/* ================= COMPONENTES ================= */
 
-function Chart({ data, max }: { data: number[]; max: number }) {
+function KPI({
+  title,
+  value,
+  danger,
+}: {
+  title: string;
+  value: string;
+  danger?: boolean;
+}) {
+  return (
+    <View style={[styles.kpiCard, danger && { borderColor: "#ef4444" }]}>
+      <Text style={styles.kpiTitle}>{title}</Text>
+      <Text style={[styles.kpiValue, danger && { color: "#ef4444" }]}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function Card({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <View style={styles.card}>
+      <Text style={styles.cardTitle}>{title}</Text>
+      {children}
+    </View>
+  );
+}
+
+function Chart({
+  data,
+  max,
+  color,
+}: {
+  data: number[];
+  max: number;
+  color: string;
+}) {
   if (data.length < 2) return null;
 
   const points = data
@@ -169,8 +219,8 @@ function Chart({ data, max }: { data: number[]; max: number }) {
     .join(" ");
 
   return (
-    <Svg width={GRAPH_WIDTH} height={GRAPH_HEIGHT} style={styles.chart}>
-      <Polyline points={points} stroke="#2563eb" strokeWidth={2} fill="none" />
+    <Svg width={GRAPH_WIDTH} height={GRAPH_HEIGHT}>
+      <Polyline points={points} stroke={color} strokeWidth={2.5} fill="none" />
     </Svg>
   );
 }
@@ -180,55 +230,85 @@ function Chart({ data, max }: { data: number[]; max: number }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 16,
+    padding: 20,
     backgroundColor: "#020617",
   },
   title: {
     color: "#fff",
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: "bold",
-    marginBottom: 12,
   },
   subtitle: {
-    color: "#cbd5f5",
-    marginVertical: 8,
-    fontWeight: "600",
+    color: "#94a3b8",
+    marginBottom: 20,
   },
-  chart: {
+  kpiRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 16,
+  },
+  kpiCard: {
+    flex: 1,
     backgroundColor: "#0f172a",
-    borderRadius: 8,
-    marginBottom: 12,
+    borderRadius: CARD_RADIUS,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#1e293b",
+  },
+  kpiTitle: {
+    color: "#94a3b8",
+    fontSize: 12,
+  },
+  kpiValue: {
+    color: "#22c55e",
+    fontSize: 22,
+    fontWeight: "bold",
+    marginTop: 4,
   },
   alertBox: {
     backgroundColor: "#7f1d1d",
-    padding: 14,
-    borderRadius: 8,
-    marginBottom: 12,
+    padding: 16,
+    borderRadius: CARD_RADIUS,
+    marginBottom: 16,
   },
-  alertText: {
+  alertTitle: {
     color: "#fecaca",
     fontWeight: "bold",
-    marginBottom: 8,
+    marginBottom: 10,
   },
-  stopBtn: {
+  alertBtn: {
     backgroundColor: "#dc2626",
     padding: 10,
-    borderRadius: 6,
+    borderRadius: 8,
     alignItems: "center",
   },
-  stopTxt: {
+  alertTxt: {
     color: "#fff",
     fontWeight: "bold",
   },
+  card: {
+    backgroundColor: "#0f172a",
+    borderRadius: CARD_RADIUS,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#1e293b",
+  },
+  cardTitle: {
+    color: "#e5e7eb",
+    fontWeight: "600",
+    marginBottom: 8,
+  },
   pdfBtn: {
     backgroundColor: "#2563eb",
-    padding: 14,
-    borderRadius: 8,
+    padding: 16,
+    borderRadius: CARD_RADIUS,
     alignItems: "center",
-    marginBottom: 30,
+    marginVertical: 24,
   },
   pdfTxt: {
     color: "#fff",
     fontWeight: "bold",
+    fontSize: 16,
   },
 });
