@@ -1,399 +1,356 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
   StyleSheet,
   Dimensions,
-  Pressable,
-  Alert,
-  SafeAreaView,
-  Platform,
-  StatusBar,
+  ScrollView,
+  TouchableOpacity,
+  Modal,
 } from "react-native";
-import Svg, { Polyline, Line, Text as SvgText } from "react-native-svg";
-import * as Haptics from "expo-haptics";
-import { createAudioPlayer } from "expo-audio";
-import * as Print from "expo-print";
-import * as Sharing from "expo-sharing";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import mqtt from "mqtt";
+import { LineChart, BarChart } from "react-native-chart-kit";
+import Svg, { Path } from "react-native-svg";
 
-/* ================= DIMENSÕES ================= */
+const screenWidth = Dimensions.get("window").width;
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
-
-const STATUS_BAR_HEIGHT =
-  Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0;
-
-/* ================= LIMITES ================= */
-
-const TEMP_CRITICA = 80;
-const VIB_CRITICA = 8;
-const DES_CRITICA = 5;
-
-/* ================= DASHBOARD ================= */
-
-export default function Dashboard() {
-  const [temp, setTemp] = useState<number[]>([]);
-  const [fftVib, setFftVib] = useState<number[]>([]);
-  const [fftDes, setFftDes] = useState<number[]>([]);
-
-  const [alertaTemp, setAlertaTemp] = useState(false);
-  const [alertaVib, setAlertaVib] = useState(false);
-  const [alertaDes, setAlertaDes] = useState(false);
-
-  const [alarmeAtivo, setAlarmeAtivo] = useState(true);
-
-  const vibracaoRef = useRef<NodeJS.Timeout | null>(null);
-  const sireneRef = useRef<any>(null);
+export default function App() {
+  const [data, setData] = useState(null);
+  const [healthHistory, setHealthHistory] = useState([]);
+  const [tooltip, setTooltip] = useState({ visible: false, text: "" });
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      const t = 60 + Math.random() * 30;
-      const vib = Array.from({ length: 32 }, () => Math.random() * 10);
-      const des = Array.from({ length: 32 }, () => Math.random() * 6);
+    const client = mqtt.connect(
+      "wss://5ae001f71edd4b68ae00ad6c224e33c2.s1.eu.hivemq.cloud:8884/mqtt",
+      {
+        username: "boracodardevs",
+        password: "@4Elementosderua",
+      },
+    );
 
-      setTemp((p) => [...p.slice(-5), t]);
-      setFftVib(vib);
-      setFftDes(des);
+    client.on("connect", () => {
+      client.subscribe("DSP");
+    });
 
-      setAlertaTemp(t > TEMP_CRITICA);
-      setAlertaVib(Math.max(...vib) > VIB_CRITICA);
-      setAlertaDes(Math.max(...des) > DES_CRITICA);
+    client.on("message", (topic, message) => {
+      const json = JSON.parse(message.toString());
+      setData(json);
+      setHealthHistory((prev) => [
+        ...prev.slice(-20),
+        json.health_index_percent,
+      ]);
+    });
 
-      if (
-        (t > TEMP_CRITICA ||
-          Math.max(...vib) > VIB_CRITICA ||
-          Math.max(...des) > DES_CRITICA) &&
-        alarmeAtivo
-      ) {
-        iniciarAlarme();
-      } else {
-        pararAlarme();
-      }
-    }, 2000);
+    return () => client.end();
+  }, []);
 
-    return () => clearInterval(interval);
-  }, [alarmeAtivo]);
+  if (!data) {
+    return (
+      <View style={styles.center}>
+        <Text style={{ color: "#fff" }}>Aguardando dados da DSP...</Text>
+      </View>
+    );
+  }
 
-  const iniciarAlarme = async () => {
-    if (!sireneRef.current) {
-      vibracaoRef.current = setInterval(() => {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      }, 1500);
+  const health = data.health_index_percent;
 
-      const player = createAudioPlayer(require("../../assets/alarm.mp3"));
-      player.loop = true;
-      player.play();
-      sireneRef.current = player;
-    }
+  const statusColor =
+    health > 80
+      ? "#00c853"
+      : health > 60
+        ? "#ffb300"
+        : health > 40
+          ? "#ff6d00"
+          : "#d50000";
+
+  const chartConfig = {
+    backgroundGradientFrom: "#1e1e1e",
+    backgroundGradientTo: "#1e1e1e",
+    decimalPlaces: 2,
+    color: () => "#ff9800",
+    labelColor: () => "#fff",
   };
 
-  const pararAlarme = () => {
-    if (vibracaoRef.current) clearInterval(vibracaoRef.current);
-    if (sireneRef.current) {
-      sireneRef.current.pause();
-      sireneRef.current.remove();
-    }
-    vibracaoRef.current = null;
-    sireneRef.current = null;
-  };
-
-  const gerarRelatorioPDF = async () => {
-    try {
-      const html = `
-      <html>
-        <body style="font-family: Arial; padding: 24px;">
-          <h2>Relatório de Monitoramento</h2>
-          <p>Temperatura: ${temp.at(-1)?.toFixed(1)} °C</p>
-          <p>FFT Vibração (pico): ${Math.max(...fftVib).toFixed(2)}</p>
-          <p>FFT Desbalanceamento (pico): ${Math.max(...fftDes).toFixed(2)}</p>
-        </body>
-      </html>`;
-      const { uri } = await Print.printToFileAsync({ html });
-      await Sharing.shareAsync(uri);
-    } catch {
-      Alert.alert("Erro", "Falha ao gerar relatório");
-    }
+  const showInfo = (text) => {
+    setTooltip({ visible: true, text });
   };
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <View style={styles.container}>
-        {/* HEADER */}
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.title}>Dashboard de Monitoramento</Text>
-            <Text style={styles.subtitle}>Motor Industrial • Tempo Real</Text>
-          </View>
+    <ScrollView style={styles.container}>
+      <Text style={styles.header}>MONITORAMENTO DE SAÚDE DO MOTOR</Text>
 
-          <View style={styles.headerBtns}>
-            <Pressable style={styles.iconBtn} onPress={gerarRelatorioPDF}>
-              <MaterialCommunityIcons
-                name="file-pdf-box"
-                size={22}
-                color="#ef4444"
-              />
-              <Text style={styles.btnTxt}>Relatório</Text>
-            </Pressable>
+      {/* STATUS GERAL */}
+      <View style={styles.card}>
+        <SectionTitle
+          title="Status Geral"
+          info="Mostra o índice global de saúde do motor baseado em vibração e falhas detectadas."
+          onPress={showInfo}
+        />
 
-            <Pressable
-              style={styles.iconBtn}
-              onPress={() => {
-                setAlarmeAtivo((p) => !p);
-                pararAlarme();
-              }}
-            >
-              <MaterialCommunityIcons
-                name={alarmeAtivo ? "alarm-light" : "alarm-light-off"}
-                size={22}
-                color={alarmeAtivo ? "#22c55e" : "#94a3b8"}
-              />
-              <Text style={styles.btnTxt}>
-                {alarmeAtivo ? "Alarme ON" : "Alarme OFF"}
-              </Text>
-            </Pressable>
-          </View>
+        <View style={styles.gaugeWrapper}>
+          <Gauge percentage={health} color={statusColor} />
+          <Text style={styles.healthText}>{health}%</Text>
         </View>
 
-        {/* KPI */}
-        <View style={styles.kpi}>
-          <Text style={styles.kpiLabel}>Temperatura Atual</Text>
-          <View style={styles.kpiRow}>
-            <Text style={[styles.kpiValue, alertaTemp && { color: "#ef4444" }]}>
-              {temp.at(-1)?.toFixed(1) ?? "--"} °C
-            </Text>
-            <StatusLed danger={alertaTemp} />
-          </View>
-        </View>
-
-        {/* GRÁFICOS */}
-        <View style={styles.graphGrid}>
-          <GraphCard
-            title="FFT – Vibração"
-            data={fftVib}
-            max={10}
-            danger={alertaVib}
-            yLabel="Amplitude"
-            xLabel="Frequência"
+        <View style={styles.row}>
+          <Metric
+            label="RMS (g)"
+            value={`${data.time_domain.rms}`}
+            info="RMS representa a energia total da vibração. Valores altos indicam possível desgaste."
+            onPress={showInfo}
           />
-          <GraphCard
-            title="FFT – Desbalanceamento"
-            data={fftDes}
-            max={8}
-            danger={alertaDes}
-            yLabel="Amplitude"
-            xLabel="Frequência"
+          <Metric
+            label="Frequência Dominante (Hz)"
+            value={`${data.frequency_domain.dominant_frequency_hz}`}
+            info="Frequência com maior amplitude detectada na FFT."
+            onPress={showInfo}
           />
         </View>
+
+        <Text style={[styles.statusText, { color: statusColor }]}>
+          {data.overall_condition.toUpperCase()}
+        </Text>
       </View>
-    </SafeAreaView>
+
+      {/* DOMÍNIO DO TEMPO */}
+      <View style={styles.card}>
+        <SectionTitle
+          title="Análise no Domínio do Tempo"
+          info="Mostra os valores RMS e Pico da vibração."
+          onPress={showInfo}
+        />
+
+        <LineChart
+          data={{
+            labels: ["RMS", "Pico"],
+            datasets: [
+              {
+                data: [data.time_domain.rms, data.time_domain.peak],
+              },
+            ],
+          }}
+          width={screenWidth - 40}
+          height={220}
+          chartConfig={chartConfig}
+        />
+      </View>
+
+      {/* FALHAS DE ROLAMENTO */}
+      <View style={styles.card}>
+        <SectionTitle
+          title="Análise de Falhas de Rolamento"
+          info="BPFO e BPFI indicam falhas na pista externa e interna do rolamento."
+          onPress={showInfo}
+        />
+
+        <BarChart
+          data={{
+            labels: ["BPFO", "BPFI"],
+            datasets: [
+              {
+                data: [
+                  data.bearing_fault_frequencies.BPFO.measured_amplitude,
+                  data.bearing_fault_frequencies.BPFI.measured_amplitude,
+                ],
+              },
+            ],
+          }}
+          width={screenWidth - 40}
+          height={220}
+          chartConfig={chartConfig}
+        />
+      </View>
+
+      {/* TENDÊNCIA SAÚDE */}
+      <View style={styles.card}>
+        <SectionTitle
+          title="Tendência do Índice de Saúde"
+          info="Mostra a evolução da saúde do motor ao longo do tempo."
+          onPress={showInfo}
+        />
+
+        <LineChart
+          data={{
+            labels: healthHistory.map((_, i) => i.toString()),
+            datasets: [{ data: healthHistory }],
+          }}
+          width={screenWidth - 40}
+          height={220}
+          chartConfig={chartConfig}
+        />
+      </View>
+
+      {/* ANÁLISE MAGNÉTICA */}
+      <View style={styles.card}>
+        <SectionTitle
+          title="Análise Magnética"
+          info="Desvio padrão do heading. Valores altos indicam desalinhamento ou instabilidade."
+          onPress={showInfo}
+        />
+        <Text style={{ color: "#fff", fontSize: 18 }}>
+          Desvio do Heading: {data.magnetic_analysis.heading_std_deviation}
+        </Text>
+      </View>
+
+      {/* TOOLTIP MODAL */}
+      <Modal transparent visible={tooltip.visible} animationType="fade">
+        <TouchableOpacity
+          style={styles.modalBackground}
+          onPress={() => setTooltip({ visible: false, text: "" })}
+        >
+          <View style={styles.tooltipBox}>
+            <Text style={{ color: "#fff" }}>{tooltip.text}</Text>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </ScrollView>
   );
 }
 
-/* ================= COMPONENTES ================= */
+/* COMPONENTES AUXILIARES */
 
-function StatusLed({ danger }: { danger: boolean }) {
-  return (
-    <View style={[styles.led, danger ? styles.ledDanger : styles.ledOk]} />
-  );
-}
+const SectionTitle = ({ title, info, onPress }) => (
+  <View style={{ flexDirection: "row", alignItems: "center" }}>
+    <Text style={styles.sectionTitle}>{title}</Text>
+    <TouchableOpacity onPress={() => onPress(info)}>
+      <Text style={styles.infoIcon}> ℹ️</Text>
+    </TouchableOpacity>
+  </View>
+);
 
-function GraphCard({ title, data, max, danger, xLabel, yLabel }: any) {
-  const graphHeight = SCREEN_HEIGHT * 0.24;
-  const graphWidth = SCREEN_WIDTH - 32;
-
-  const paddingLeft = 42;
-  const paddingBottom = 30;
-  const paddingTop = 10;
-  const paddingRight = 10;
-
-  if (!data || data.length < 2) return null;
-
-  const points = data
-    .map((v: number, i: number) => {
-      const x =
-        paddingLeft +
-        (i / (data.length - 1)) * (graphWidth - paddingLeft - paddingRight);
-      const y =
-        paddingTop + (1 - v / max) * (graphHeight - paddingTop - paddingBottom);
-      return `${x},${y}`;
-    })
-    .join(" ");
-
-  const ticksY = 4;
-  const ticksX = 4;
-
-  return (
-    <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <Text style={styles.cardTitle}>{title}</Text>
-        <StatusLed danger={danger} />
-      </View>
-
-      <Svg width={graphWidth} height={graphHeight}>
-        {/* EIXOS */}
-        <Line
-          x1={paddingLeft}
-          y1={paddingTop}
-          x2={paddingLeft}
-          y2={graphHeight - paddingBottom}
-          stroke="#475569"
-        />
-        <Line
-          x1={paddingLeft}
-          y1={graphHeight - paddingBottom}
-          x2={graphWidth - paddingRight}
-          y2={graphHeight - paddingBottom}
-          stroke="#475569"
-        />
-
-        {/* Y TICKS */}
-        {Array.from({ length: ticksY + 1 }).map((_, i) => {
-          const y =
-            paddingTop +
-            (i / ticksY) * (graphHeight - paddingTop - paddingBottom);
-          const value = (max * (ticksY - i)) / ticksY;
-          return (
-            <React.Fragment key={i}>
-              <Line
-                x1={paddingLeft - 4}
-                y1={y}
-                x2={paddingLeft}
-                y2={y}
-                stroke="#475569"
-              />
-              <SvgText
-                x={paddingLeft - 8}
-                y={y + 4}
-                fontSize="10"
-                fill="#94a3b8"
-                textAnchor="end"
-              >
-                {value.toFixed(0)}
-              </SvgText>
-            </React.Fragment>
-          );
-        })}
-
-        {/* X TICKS */}
-        {Array.from({ length: ticksX + 1 }).map((_, i) => {
-          const x =
-            paddingLeft +
-            (i / ticksX) * (graphWidth - paddingLeft - paddingRight);
-          return (
-            <SvgText
-              key={i}
-              x={x}
-              y={graphHeight - paddingBottom + 14}
-              fontSize="10"
-              fill="#94a3b8"
-              textAnchor="middle"
-            >
-              {Math.round((data.length * i) / ticksX)}
-            </SvgText>
-          );
-        })}
-
-        {/* LINHA */}
-        <Polyline
-          points={points}
-          stroke={danger ? "#ef4444" : "#38bdf8"}
-          strokeWidth={2.5}
-          fill="none"
-        />
-
-        {/* LEGENDAS */}
-        <SvgText
-          x={graphWidth / 2}
-          y={graphHeight - 4}
-          fontSize="10"
-          fill="#94a3b8"
-          textAnchor="middle"
-        >
-          {xLabel}
-        </SvgText>
-
-        <SvgText
-          x={12}
-          y={graphHeight / 2}
-          fontSize="10"
-          fill="#94a3b8"
-          textAnchor="middle"
-          rotation="-90"
-          origin={`12,${graphHeight / 2}`}
-        >
-          {yLabel}
-        </SvgText>
-      </Svg>
+const Metric = ({ label, value, info, onPress }) => (
+  <View style={styles.metricBox}>
+    <View style={{ flexDirection: "row" }}>
+      <Text style={styles.metricLabel}>{label}</Text>
+      <TouchableOpacity onPress={() => onPress(info)}>
+        <Text style={styles.infoIcon}> ℹ️</Text>
+      </TouchableOpacity>
     </View>
-  );
-}
+    <Text style={styles.metricValue}>{value}</Text>
+  </View>
+);
 
-/* ================= STYLES ================= */
+const Gauge = ({ percentage, color }) => {
+  const angle = (percentage / 100) * 180;
+
+  const polarToCartesian = (cx, cy, r, angle) => {
+    const rad = (angle - 90) * (Math.PI / 180);
+    return {
+      x: cx + r * Math.cos(rad),
+      y: cy + r * Math.sin(rad),
+    };
+  };
+
+  const describeArc = (x, y, r, startAngle, endAngle) => {
+    const start = polarToCartesian(x, y, r, endAngle);
+    const end = polarToCartesian(x, y, r, startAngle);
+    const largeArcFlag = endAngle - startAngle <= 180 ? "0" : "1";
+    return `M ${start.x} ${start.y}
+            A ${r} ${r} 0 ${largeArcFlag} 0 ${end.x} ${end.y}`;
+  };
+
+  return (
+    <Svg width={200} height={120}>
+      <Path
+        d={describeArc(100, 100, 80, 0, 180)}
+        stroke="#333"
+        strokeWidth="20"
+        fill="none"
+      />
+      <Path
+        d={describeArc(100, 100, 80, 0, angle)}
+        stroke={color}
+        strokeWidth="20"
+        fill="none"
+      />
+    </Svg>
+  );
+};
+
+/* ESTILOS */
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#020617" },
-  container: { flex: 1, paddingHorizontal: 14 },
-
-  header: {
-    marginTop: STATUS_BAR_HEIGHT,
-    height: 64,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-
-  headerBtns: { flexDirection: "row", gap: 14 },
-
-  title: { color: "#fff", fontSize: 18, fontWeight: "bold" },
-  subtitle: { color: "#94a3b8", fontSize: 12 },
-
-  iconBtn: { alignItems: "center" },
-  btnTxt: { fontSize: 10, color: "#e5e7eb" },
-
-  kpi: {
-    marginVertical: 8,
-    backgroundColor: "#0f172a",
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#1e293b",
-  },
-
-  kpiLabel: { color: "#94a3b8", fontSize: 12 },
-
-  kpiRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-
-  kpiValue: {
-    fontSize: 30,
-    fontWeight: "bold",
-    color: "#22c55e",
-  },
-
-  graphGrid: { flex: 1, gap: 8 },
-
-  card: {
+  container: {
     flex: 1,
-    backgroundColor: "#0f172a",
-    borderRadius: 14,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: "#1e293b",
+    backgroundColor: "#121212",
+    padding: 20,
   },
-
-  cardHeader: {
+  center: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#121212",
+  },
+  header: {
+    fontSize: 22,
+    color: "#fff",
+    textAlign: "center",
+    marginBottom: 20,
+    fontWeight: "bold",
+  },
+  card: {
+    backgroundColor: "#1e1e1e",
+    padding: 15,
+    borderRadius: 12,
+    marginBottom: 20,
+  },
+  sectionTitle: {
+    color: "#fff",
+    fontSize: 16,
+    marginBottom: 10,
+    fontWeight: "600",
+  },
+  infoIcon: {
+    color: "#ff9800",
+    fontSize: 14,
+  },
+  gaugeWrapper: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  healthText: {
+    position: "absolute",
+    top: 45,
+    fontSize: 22,
+    color: "#fff",
+    fontWeight: "bold",
+  },
+  row: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 4,
+    marginTop: 15,
   },
-
-  cardTitle: { color: "#e5e7eb", fontWeight: "600" },
-
-  led: { borderRadius: 50 },
-  ledOk: { width: 10, height: 10, backgroundColor: "#22c55e" },
-  ledDanger: { width: 16, height: 16, backgroundColor: "#ef4444" },
+  metricBox: {
+    backgroundColor: "#2a2a2a",
+    padding: 10,
+    borderRadius: 8,
+    width: "48%",
+  },
+  metricLabel: {
+    color: "#aaa",
+    fontSize: 12,
+  },
+  metricValue: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+  statusText: {
+    marginTop: 10,
+    textAlign: "center",
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+  modalBackground: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  tooltipBox: {
+    backgroundColor: "#2b2e34",
+    padding: 20,
+    borderRadius: 10,
+    width: "80%",
+  },
 });
