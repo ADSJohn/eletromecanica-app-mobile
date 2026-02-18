@@ -1,23 +1,16 @@
 import React, { useEffect, useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  Dimensions,
-  ScrollView,
-  TouchableOpacity,
-  Modal,
-} from "react-native";
+import { View, Text, StyleSheet, Dimensions, ScrollView } from "react-native";
 import mqtt from "mqtt";
 import { LineChart, BarChart } from "react-native-chart-kit";
 import Svg, { Path } from "react-native-svg";
+import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 
 const screenWidth = Dimensions.get("window").width;
 
 export default function App() {
   const [data, setData] = useState(null);
+  const [temperatura, setTemperatura] = useState(0);
   const [healthHistory, setHealthHistory] = useState([]);
-  const [tooltip, setTooltip] = useState({ visible: false, text: "" });
 
   useEffect(() => {
     const client = mqtt.connect(
@@ -30,15 +23,23 @@ export default function App() {
 
     client.on("connect", () => {
       client.subscribe("DSP");
+      client.subscribe("sensor_temperatura_DS18B20");
     });
 
     client.on("message", (topic, message) => {
-      const json = JSON.parse(message.toString());
-      setData(json);
-      setHealthHistory((prev) => [
-        ...prev.slice(-20),
-        json.health_index_percent,
-      ]);
+      if (topic === "DSP") {
+        const json = JSON.parse(message.toString());
+        setData(json);
+        setHealthHistory((prev) => [
+          ...prev.slice(-20),
+          json.health_index_percent,
+        ]);
+      }
+
+      if (topic === "sensor_temperatura_DS18B20") {
+        const tempJson = JSON.parse(message.toString());
+        setTemperatura(tempJson.temperatura);
+      }
     });
 
     return () => client.end();
@@ -47,14 +48,15 @@ export default function App() {
   if (!data) {
     return (
       <View style={styles.center}>
-        <Text style={{ color: "#fff" }}>Aguardando dados da DSP...</Text>
+        <Text style={{ color: "#fff" }}>Aguardando dados...</Text>
       </View>
     );
   }
 
   const health = data.health_index_percent;
+  const magneticDeviation = data.magnetic_analysis?.heading_std_deviation || 0;
 
-  const statusColor =
+  const healthColor =
     health > 80
       ? "#00c853"
       : health > 60
@@ -63,85 +65,69 @@ export default function App() {
           ? "#ff6d00"
           : "#d50000";
 
+  const tempColor =
+    temperatura <= 50 ? "#00c853" : temperatura <= 70 ? "#ffb300" : "#d50000";
+
   const chartConfig = {
-    backgroundGradientFrom: "#1e1e1e",
-    backgroundGradientTo: "#1e1e1e",
+    backgroundGradientFrom: "#1a1a1a",
+    backgroundGradientTo: "#1a1a1a",
     decimalPlaces: 2,
-    color: () => "#ff9800",
+    color: (opacity = 1) => `rgba(255,165,0,${opacity})`,
     labelColor: () => "#fff",
   };
 
-  const showInfo = (text) => {
-    setTooltip({ visible: true, text });
-  };
-
   return (
-    <ScrollView style={styles.container}>
-      <Text style={styles.header}>MONITORAMENTO DE SAÚDE DO MOTOR</Text>
+    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      <Text style={styles.header}>PAINEL INDUSTRIAL</Text>
 
-      {/* STATUS GERAL */}
-      <View style={styles.card}>
-        <SectionTitle
-          title="Status Geral"
-          info="Mostra o índice global de saúde do motor baseado em vibração e falhas detectadas."
-          onPress={showInfo}
-        />
-
+      {/* ===== TEMPERATURA (MENOR) ===== */}
+      <View style={styles.cardSmall}>
+        <Text style={styles.sectionTitle}>Temperatura</Text>
         <View style={styles.gaugeWrapper}>
-          <Gauge percentage={health} color={statusColor} />
-          <Text style={styles.healthText}>{health}%</Text>
-        </View>
-
-        <View style={styles.row}>
-          <Metric
-            label="RMS (g)"
-            value={`${data.time_domain.rms}`}
-            info="RMS representa a energia total da vibração. Valores altos indicam possível desgaste."
-            onPress={showInfo}
+          <Gauge value={temperatura} max={100} color={tempColor} size={160} />
+          <Icon
+            name="thermometer"
+            size={22}
+            color={tempColor}
+            style={{ position: "absolute", top: 30 }}
           />
-          <Metric
-            label="Frequência Dominante (Hz)"
-            value={`${data.frequency_domain.dominant_frequency_hz}`}
-            info="Frequência com maior amplitude detectada na FFT."
-            onPress={showInfo}
-          />
+          <Text style={styles.gaugeText}>{temperatura}°C</Text>
         </View>
-
-        <Text style={[styles.statusText, { color: statusColor }]}>
-          {data.overall_condition.toUpperCase()}
-        </Text>
       </View>
 
-      {/* DOMÍNIO DO TEMPO */}
+      {/* ===== SAÚDE DO MOTOR ===== */}
+      <View style={styles.cardLarge}>
+        <Text style={styles.sectionTitle}>Índice de Saúde</Text>
+        <View style={styles.gaugeWrapper}>
+          <Gauge value={health} max={100} color={healthColor} size={220} />
+          <Text style={styles.gaugeTextLarge}>{health}%</Text>
+        </View>
+      </View>
+
+      {/* ===== VIBRAÇÃO ===== */}
       <View style={styles.card}>
-        <SectionTitle
-          title="Análise no Domínio do Tempo"
-          info="Mostra os valores RMS e Pico da vibração."
-          onPress={showInfo}
-        />
+        <Text style={styles.sectionTitle}>Análise de Vibração</Text>
+
+        <View style={styles.row}>
+          <Metric label="RMS" value={`${data.time_domain.rms} g`} />
+          <Metric label="Pico" value={`${data.time_domain.peak} g`} />
+        </View>
 
         <LineChart
           data={{
             labels: ["RMS", "Pico"],
-            datasets: [
-              {
-                data: [data.time_domain.rms, data.time_domain.peak],
-              },
-            ],
+            datasets: [{ data: [data.time_domain.rms, data.time_domain.peak] }],
           }}
           width={screenWidth - 40}
-          height={220}
+          height={180}
           chartConfig={chartConfig}
+          withDots={false}
         />
       </View>
 
-      {/* FALHAS DE ROLAMENTO */}
+      {/* ===== FALHAS DE ROLAMENTO ===== */}
       <View style={styles.card}>
-        <SectionTitle
-          title="Análise de Falhas de Rolamento"
-          info="BPFO e BPFI indicam falhas na pista externa e interna do rolamento."
-          onPress={showInfo}
-        />
+        <Text style={styles.sectionTitle}>Falhas de Rolamento</Text>
 
         <BarChart
           data={{
@@ -156,82 +142,38 @@ export default function App() {
             ],
           }}
           width={screenWidth - 40}
-          height={220}
+          height={180}
           chartConfig={chartConfig}
         />
       </View>
 
-      {/* TENDÊNCIA SAÚDE */}
+      {/* ===== DESVIO MAGNÉTICO ===== */}
       <View style={styles.card}>
-        <SectionTitle
-          title="Tendência do Índice de Saúde"
-          info="Mostra a evolução da saúde do motor ao longo do tempo."
-          onPress={showInfo}
-        />
+        <Text style={styles.sectionTitle}>Desvio Magnético</Text>
 
-        <LineChart
-          data={{
-            labels: healthHistory.map((_, i) => i.toString()),
-            datasets: [{ data: healthHistory }],
-          }}
-          width={screenWidth - 40}
-          height={220}
-          chartConfig={chartConfig}
-        />
+        <View style={styles.magneticBox}>
+          <Icon name="compass" size={28} color="#00e5ff" />
+          <Text style={styles.magneticValue}>
+            {magneticDeviation.toFixed(2)} °
+          </Text>
+        </View>
       </View>
-
-      {/* ANÁLISE MAGNÉTICA */}
-      <View style={styles.card}>
-        <SectionTitle
-          title="Análise Magnética"
-          info="Desvio padrão do heading. Valores altos indicam desalinhamento ou instabilidade."
-          onPress={showInfo}
-        />
-        <Text style={{ color: "#fff", fontSize: 18 }}>
-          Desvio do Heading: {data.magnetic_analysis.heading_std_deviation}
-        </Text>
-      </View>
-
-      {/* TOOLTIP MODAL */}
-      <Modal transparent visible={tooltip.visible} animationType="fade">
-        <TouchableOpacity
-          style={styles.modalBackground}
-          onPress={() => setTooltip({ visible: false, text: "" })}
-        >
-          <View style={styles.tooltipBox}>
-            <Text style={{ color: "#fff" }}>{tooltip.text}</Text>
-          </View>
-        </TouchableOpacity>
-      </Modal>
     </ScrollView>
   );
 }
 
-/* COMPONENTES AUXILIARES */
+/* ================= COMPONENTES ================= */
 
-const SectionTitle = ({ title, info, onPress }) => (
-  <View style={{ flexDirection: "row", alignItems: "center" }}>
-    <Text style={styles.sectionTitle}>{title}</Text>
-    <TouchableOpacity onPress={() => onPress(info)}>
-      <Text style={styles.infoIcon}> ℹ️</Text>
-    </TouchableOpacity>
-  </View>
-);
-
-const Metric = ({ label, value, info, onPress }) => (
+const Metric = ({ label, value }) => (
   <View style={styles.metricBox}>
-    <View style={{ flexDirection: "row" }}>
-      <Text style={styles.metricLabel}>{label}</Text>
-      <TouchableOpacity onPress={() => onPress(info)}>
-        <Text style={styles.infoIcon}> ℹ️</Text>
-      </TouchableOpacity>
-    </View>
+    <Text style={styles.metricLabel}>{label}</Text>
     <Text style={styles.metricValue}>{value}</Text>
   </View>
 );
 
-const Gauge = ({ percentage, color }) => {
-  const angle = (percentage / 100) * 180;
+const Gauge = ({ value, max, color, size }) => {
+  const angle = (value / max) * 180;
+  const radius = size / 2 - 20;
 
   const polarToCartesian = (cx, cy, r, angle) => {
     const rad = (angle - 90) * (Math.PI / 180);
@@ -245,72 +187,90 @@ const Gauge = ({ percentage, color }) => {
     const start = polarToCartesian(x, y, r, endAngle);
     const end = polarToCartesian(x, y, r, startAngle);
     const largeArcFlag = endAngle - startAngle <= 180 ? "0" : "1";
+
     return `M ${start.x} ${start.y}
             A ${r} ${r} 0 ${largeArcFlag} 0 ${end.x} ${end.y}`;
   };
 
   return (
-    <Svg width={200} height={120}>
+    <Svg width={size} height={size / 1.7}>
       <Path
-        d={describeArc(100, 100, 80, 0, 180)}
+        d={describeArc(size / 2, size / 2, radius, 0, 180)}
         stroke="#333"
-        strokeWidth="20"
+        strokeWidth="18"
         fill="none"
       />
       <Path
-        d={describeArc(100, 100, 80, 0, angle)}
+        d={describeArc(size / 2, size / 2, radius, 0, angle)}
         stroke={color}
-        strokeWidth="20"
+        strokeWidth="18"
         fill="none"
       />
     </Svg>
   );
 };
 
-/* ESTILOS */
+/* ================= ESTILOS ================= */
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#121212",
-    padding: 20,
+    backgroundColor: "#0d0d0d",
+    padding: 15,
   },
   center: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#121212",
+    backgroundColor: "#0d0d0d",
   },
   header: {
-    fontSize: 22,
-    color: "#fff",
+    fontSize: 18,
+    color: "#00e5ff",
     textAlign: "center",
-    marginBottom: 20,
+    marginBottom: 15,
     fontWeight: "bold",
   },
   card: {
-    backgroundColor: "#1e1e1e",
+    backgroundColor: "#1c1c1c",
     padding: 15,
     borderRadius: 12,
+    marginBottom: 15,
+  },
+  cardSmall: {
+    backgroundColor: "#1c1c1c",
+    padding: 15,
+    borderRadius: 12,
+    marginBottom: 15,
+    alignItems: "center",
+  },
+  cardLarge: {
+    backgroundColor: "#1c1c1c",
+    padding: 20,
+    borderRadius: 14,
     marginBottom: 20,
+    alignItems: "center",
   },
   sectionTitle: {
     color: "#fff",
-    fontSize: 16,
+    fontSize: 14,
     marginBottom: 10,
     fontWeight: "600",
-  },
-  infoIcon: {
-    color: "#ff9800",
-    fontSize: 14,
   },
   gaugeWrapper: {
     alignItems: "center",
     justifyContent: "center",
   },
-  healthText: {
+  gaugeText: {
     position: "absolute",
     top: 45,
+    fontSize: 16,
+    color: "#fff",
+    fontWeight: "bold",
+  },
+  gaugeTextLarge: {
+    position: "absolute",
+    top: 65,
     fontSize: 22,
     color: "#fff",
     fontWeight: "bold",
@@ -318,7 +278,7 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: 15,
+    marginBottom: 10,
   },
   metricBox: {
     backgroundColor: "#2a2a2a",
@@ -332,25 +292,19 @@ const styles = StyleSheet.create({
   },
   metricValue: {
     color: "#fff",
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "bold",
   },
-  statusText: {
-    marginTop: 10,
-    textAlign: "center",
-    fontSize: 18,
-    fontWeight: "bold",
-  },
-  modalBackground: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.7)",
-    justifyContent: "center",
+  magneticBox: {
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
+    padding: 15,
   },
-  tooltipBox: {
-    backgroundColor: "#2b2e34",
-    padding: 20,
-    borderRadius: 10,
-    width: "80%",
+  magneticValue: {
+    color: "#fff",
+    fontSize: 20,
+    fontWeight: "bold",
+    marginLeft: 10,
   },
 });
