@@ -1,26 +1,27 @@
 import mqtt from "mqtt";
-import config from "../config/mqttConfing";
 
-let client;
+const BROKER_URL = "ws://192.168.1.121:9001";
+// ⚠️ TROQUE para o IP do seu PC rodando Docker
 
-export const connectMQTT = (onMessage) => {
-  client = mqtt.connect(config.broker, {
-    username: config.username,
-    password: config.password,
-    reconnectPeriod: 5000,
-  });
+export const createMqttClient = (onMessage: any, onStatus: any) => {
+  const client = mqtt.connect(BROKER_URL);
 
   client.on("connect", () => {
-    console.log("Conectado ao HiveMQ");
-    client.subscribe(config.topic);
+    console.log("✅ Conectado ao Mosquitto");
+    onStatus("Conectado");
+
+    client.subscribe("DSP");
+    client.subscribe("sensor_temperatura_DS18B20");
+  });
+
+  client.on("error", (err) => {
+    console.log("Erro MQTT:", err);
+    onStatus("Erro conexão");
   });
 
   client.on("message", (topic, message) => {
-    try {
-      const parsed = JSON.parse(message.toString());
-      onMessage(parsed);
-    } catch (e) {
-      console.log("Erro JSON:", e);
-    }
+    onMessage(topic, message.toString());
   });
+
+  return client;
 };

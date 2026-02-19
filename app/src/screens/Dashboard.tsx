@@ -3,31 +3,26 @@ import {
   View,
   Text,
   StyleSheet,
-  Dimensions,
   ScrollView,
+  Dimensions,
   TouchableOpacity,
-  Alert,
 } from "react-native";
 import mqtt from "mqtt";
-import { LineChart, BarChart } from "react-native-chart-kit";
+import { LineChart } from "react-native-chart-kit";
+import { AnimatedCircularProgress } from "react-native-circular-progress";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 
 const screenWidth = Dimensions.get("window").width;
+const MQTT_URL = "ws://192.168.1.121:9001";
 
 export default function App() {
-  const [data, setData] = useState(null);
-  const [temperatura, setTemperatura] = useState(0);
+  const [data, setData] = useState<any>(null);
+  const [temperatura, setTemperatura] = useState<number>(0);
 
   useEffect(() => {
-    const client = mqtt.connect(
-      "wss://5ae001f71edd4b68ae00ad6c224e33c2.s1.eu.hivemq.cloud:8884/mqtt",
-      {
-        username: "boracodardevs",
-        password: "@4Elementosderua",
-      },
-    );
+    const client = mqtt.connect(MQTT_URL);
 
     client.on("connect", () => {
       client.subscribe("DSP");
@@ -35,320 +30,293 @@ export default function App() {
     });
 
     client.on("message", (topic, message) => {
-      if (topic === "DSP") {
-        setData(JSON.parse(message.toString()));
-      }
+      try {
+        if (topic === "DSP") {
+          setData(JSON.parse(message.toString()));
+        }
 
-      if (topic === "sensor_temperatura_DS18B20") {
-        const tempJson = JSON.parse(message.toString());
-        setTemperatura(tempJson.temperatura);
+        if (topic === "sensor_temperatura_DS18B20") {
+          const temp = JSON.parse(message.toString());
+          setTemperatura(temp?.temperatura ?? 0);
+        }
+      } catch (err) {
+        console.log("Erro MQTT:", err);
       }
     });
 
     return () => client.end();
   }, []);
 
-  /* ================= PDF ================= */
+  if (!data)
+    return (
+      <View style={styles.center}>
+        <Icon name="lan-disconnect" size={60} color="#00e5ff" />
+        <Text style={{ color: "#aaa", marginTop: 15 }}>
+          Aguardando dados MQTT...
+        </Text>
+      </View>
+    );
+
+  /* ================= EXTRAÇÃO SEGURA ================= */
+
+  const rpm = data?.device_info?.rpm ?? 0;
+  const rms = data?.time_domain?.rms ?? 0;
+  const peak = data?.time_domain?.peak ?? 0;
+  const dominantFreq = data?.frequency_domain?.dominant_frequency_hz ?? 0;
+  const health = data?.health_index_percent ?? 0;
+  const headingStd = data?.magnetic_analysis?.heading_std_deviation ?? 0;
+
+  const amp1x = data?.shaft_orders?.["1x_RPM"] ?? 0;
+  const amp2x = data?.shaft_orders?.["2x_RPM"] ?? 0;
+  const amp3x = data?.shaft_orders?.["3x_RPM"] ?? 0;
+
+  const bpfo = data?.bearing_fault_frequencies?.BPFO ?? 0;
+  const bpfi = data?.bearing_fault_frequencies?.BPFI ?? 0;
+
+  const freqs = data?.spectrum?.frequencies_hz ?? [];
+  const amps = data?.spectrum?.amplitudes ?? [];
+
+  /* ================= CORES ================= */
+
+  const healthColor =
+    health > 80 ? "#00e676" : health > 60 ? "#ffb300" : "#ff1744";
+
+  const tempColor =
+    temperatura < 50 ? "#00e676" : temperatura < 70 ? "#ffb300" : "#ff1744";
+
+  /* ================= RELATÓRIO ================= */
 
   const gerarRelatorio = async () => {
-    if (!data) {
-      Alert.alert("Sem dados", "Aguardando informações do sistema.");
-      return;
-    }
-
-    const rpm = data.device_info?.rpm || 0;
-    const freq1x = rpm / 60;
-    const freq2x = freq1x * 2;
-    const freq3x = freq1x * 3;
-
     const html = `
-      <html>
-      <body style="font-family: Arial; padding:20px;">
-        <h1>Relatório Industrial</h1>
-        <h2>Índice de Saúde: ${data.health_index_percent.toFixed(0)}%</h2>
-        <h2>Temperatura: ${temperatura.toFixed(1)}°C</h2>
-        <h3>Harmônicas</h3>
-        <p>1x RPM: ${freq1x.toFixed(2)} Hz</p>
-        <p>2x RPM: ${freq2x.toFixed(2)} Hz</p>
-        <p>3x RPM: ${freq3x.toFixed(2)} Hz</p>
-      </body>
-      </html>
+      <h1>Relatório Motor</h1>
+      <p>RPM: ${rpm}</p>
+      <p>Temperatura: ${temperatura.toFixed(1)}°C</p>
+      <p>RMS: ${rms}</p>
+      <p>Pico: ${peak}</p>
+      <p>Saúde: ${health}%</p>
+      <p>1xRPM: ${amp1x}</p>
+      <p>2xRPM: ${amp2x}</p>
+      <p>3xRPM: ${amp3x}</p>
+      <p>BPFO: ${bpfo}</p>
+      <p>BPFI: ${bpfi}</p>
     `;
 
     const { uri } = await Print.printToFileAsync({ html });
     await Sharing.shareAsync(uri);
   };
 
-  if (!data) {
-    return (
-      <View style={styles.center}>
-        <Text style={{ color: "#fff" }}>Aguardando dados da DSP...</Text>
-      </View>
-    );
-  }
-
-  const rpm = data.device_info?.rpm || 0;
-  const freq1x = rpm / 60;
-  const freq2x = freq1x * 2;
-  const freq3x = freq1x * 3;
-
-  const health = data.health_index_percent;
-  const magneticDeviation = data.magnetic_analysis?.heading_std_deviation || 0;
-
-  const healthColor =
-    health > 80
-      ? "#00c853"
-      : health > 60
-        ? "#ffb300"
-        : health > 40
-          ? "#ff6d00"
-          : "#d50000";
-
-  const tempColor =
-    temperatura <= 50 ? "#00c853" : temperatura <= 70 ? "#ffb300" : "#d50000";
-
   const chartConfig = {
-    backgroundGradientFrom: "#1a1a1a",
-    backgroundGradientTo: "#1a1a1a",
-    decimalPlaces: 2,
-    color: () => "#ffa500",
-    labelColor: () => "#fff",
+    backgroundGradientFrom: "#111",
+    backgroundGradientTo: "#111",
+    decimalPlaces: 4,
+    color: () => "#00e5ff",
+    labelColor: () => "#aaa",
   };
 
   return (
     <ScrollView style={styles.container}>
-      {/* HEADER */}
-      <View style={styles.headerContainer}>
-        <Text style={styles.header}>🏭 PAINEL SCADA INDUSTRIAL</Text>
-        <TouchableOpacity style={styles.pdfButton} onPress={gerarRelatorio}>
-          <Icon name="file-pdf-box" size={22} color="#fff" />
-          <Text style={styles.pdfText}>Relatório</Text>
-        </TouchableOpacity>
-      </View>
+      <Text style={styles.title}>🏭 PAINEL INDUSTRIAL PCM</Text>
 
-      {/* STATUS GERAL */}
-      <View style={styles.card}>
-        <View style={styles.rowBetween}>
-          <View style={styles.metricFull}>
-            <Icon name="heart-pulse" size={22} color={healthColor} />
-            <Text style={[styles.bigValue, { color: healthColor }]}>
-              {health.toFixed(0)}%
-            </Text>
-            <Text style={styles.label}>Índice de Saúde</Text>
-          </View>
+      {/* ================= GAUGES ================= */}
+      <View style={styles.row}>
+        {/* SAÚDE */}
+        <View style={styles.gaugeBox}>
+          <AnimatedCircularProgress
+            size={130}
+            width={12}
+            fill={health}
+            tintColor={healthColor}
+            backgroundColor="#333"
+          >
+            {() => (
+              <View style={{ alignItems: "center" }}>
+                <Icon name="heart-pulse" size={26} color={healthColor} />
+                <Text style={styles.gaugeValue}>{health.toFixed(0)}%</Text>
+                <Text style={styles.gaugeLabel}>Saúde</Text>
+              </View>
+            )}
+          </AnimatedCircularProgress>
+        </View>
 
-          <View style={styles.metricFull}>
-            <Icon name="thermometer" size={22} color={tempColor} />
-            <Text style={[styles.bigValue, { color: tempColor }]}>
-              {temperatura.toFixed(1)}°C
-            </Text>
-            <Text style={styles.label}>Temperatura</Text>
-          </View>
+        {/* TEMPERATURA */}
+        <View style={styles.gaugeBox}>
+          <AnimatedCircularProgress
+            size={130}
+            width={12}
+            fill={temperatura}
+            tintColor={tempColor}
+            backgroundColor="#333"
+          >
+            {() => (
+              <View style={{ alignItems: "center" }}>
+                <Icon name="thermometer" size={26} color={tempColor} />
+                <Text style={styles.gaugeValue}>
+                  {temperatura.toFixed(1)}°C
+                </Text>
+                <Text style={styles.gaugeLabel}>Temperatura</Text>
+              </View>
+            )}
+          </AnimatedCircularProgress>
         </View>
       </View>
 
-      {/* HARMÔNICAS */}
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>⚙ Harmônicas do Eixo</Text>
+      {/* ================= MÉTRICAS ================= */}
+      <Card title="📈 Vibração">
+        <Metric icon="waveform" label="RMS" value={rms.toFixed(5)} />
+        <Metric icon="arrow-up-bold" label="Pico" value={peak.toFixed(5)} />
+      </Card>
 
-        <View style={styles.row}>
-          <Metric
-            icon="speedometer"
-            label="1x RPM"
-            value={`${freq1x.toFixed(2)} Hz`}
-          />
-          <Metric
-            icon="speedometer-medium"
-            label="2x RPM"
-            value={`${freq2x.toFixed(2)} Hz`}
-          />
-        </View>
-
-        <View style={styles.row}>
-          <Metric
-            icon="speedometer-slow"
-            label="3x RPM"
-            value={`${freq3x.toFixed(2)} Hz`}
-          />
-          <Metric icon="rotate-right" label="RPM" value={`${rpm.toFixed(0)}`} />
-        </View>
-
-        <BarChart
-          data={{
-            labels: ["1x", "2x", "3x"],
-            datasets: [
-              {
-                data: [freq1x, freq2x, freq3x],
-              },
-            ],
-          }}
-          width={screenWidth - 40}
-          height={180}
-          chartConfig={chartConfig}
+      <Card title="📡 Frequência">
+        <Metric
+          icon="chart-line"
+          label="Freq Dominante"
+          value={`${dominantFreq.toFixed(2)} Hz`}
         />
-      </View>
-
-      {/* VIBRAÇÃO */}
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>📈 Vibração</Text>
-
-        <View style={styles.row}>
-          <Metric
-            icon="waveform"
-            label="RMS"
-            value={`${data.time_domain.rms.toFixed(2)} g`}
-          />
-          <Metric
-            icon="arrow-collapse-up"
-            label="Pico"
-            value={`${data.time_domain.peak.toFixed(2)} g`}
-          />
-        </View>
-      </View>
-
-      {/* FALHAS */}
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>🔎 Rolamentos</Text>
-
-        <BarChart
-          data={{
-            labels: ["BPFO", "BPFI"],
-            datasets: [
-              {
-                data: [
-                  data.bearing_fault_frequencies.BPFO.measured_amplitude,
-                  data.bearing_fault_frequencies.BPFI.measured_amplitude,
-                ],
-              },
-            ],
-          }}
-          width={screenWidth - 40}
-          height={180}
-          chartConfig={chartConfig}
+        <Metric
+          icon="compass"
+          label="Desvio Magnético"
+          value={headingStd.toFixed(3)}
         />
-      </View>
+      </Card>
 
-      {/* MAGNÉTICO */}
-      <View style={styles.card}>
-        <View style={styles.rowCenter}>
-          <Icon name="compass" size={26} color="#00e5ff" />
-          <Text style={styles.magneticValue}>
-            {magneticDeviation.toFixed(2)}°
-          </Text>
-          <Text style={styles.label}>Desvio Magnético</Text>
-        </View>
-      </View>
+      <Card title="⚙ Harmônicas">
+        <Metric icon="numeric-1-circle" label="1x RPM" value={amp1x} />
+        <Metric icon="numeric-2-circle" label="2x RPM" value={amp2x} />
+        <Metric icon="numeric-3-circle" label="3x RPM" value={amp3x} />
+      </Card>
+
+      <Card title="🔎 Rolamentos">
+        <Metric icon="alpha-b-circle" label="BPFO" value={bpfo} />
+        <Metric icon="alpha-b-circle-outline" label="BPFI" value={bpfi} />
+      </Card>
+
+      {/* ================= FFT ================= */}
+      <Card title="📊 Spectrum FFT">
+        <Text style={styles.axisLabel}>
+          Eixo X → Frequência (Hz) | Eixo Y → Amplitude
+        </Text>
+
+        {amps.length > 0 && (
+          <LineChart
+            data={{
+              labels: freqs
+                .filter((_, i) => i % 8 === 0)
+                .map((f: number) => f.toFixed(0)),
+              datasets: [{ data: amps }],
+            }}
+            width={screenWidth - 40}
+            height={250}
+            chartConfig={chartConfig}
+            withDots={false}
+          />
+        )}
+      </Card>
+
+      {/* ================= BOTÃO ================= */}
+      <TouchableOpacity style={styles.pdfButton} onPress={gerarRelatorio}>
+        <Icon name="file-pdf-box" size={18} color="#fff" />
+        <Text style={styles.pdfText}>Relatório</Text>
+      </TouchableOpacity>
     </ScrollView>
   );
 }
 
-/* COMPONENTE MÉTRICA */
+/* ================= COMPONENTES ================= */
 
-const Metric = ({ icon, label, value }) => (
-  <View style={styles.metricBox}>
-    <Icon name={icon} size={18} color="#00e5ff" />
-    <Text style={styles.metricValue}>{value}</Text>
-    <Text style={styles.metricLabel}>{label}</Text>
+const Card = ({ title, children }: any) => (
+  <View style={styles.card}>
+    <Text style={styles.cardTitle}>{title}</Text>
+    {children}
   </View>
 );
 
-/* ================= ESTILOS ================= */
+const Metric = ({ icon, label, value }: any) => (
+  <View style={styles.metricRow}>
+    <View style={{ flexDirection: "row", alignItems: "center" }}>
+      <Icon name={icon} size={18} color="#00e5ff" />
+      <Text style={styles.metricLabel}>{label}</Text>
+    </View>
+    <Text style={styles.metricValue}>{value}</Text>
+  </View>
+);
+
+/* ================= ESTILO ================= */
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#0d0d0d",
-    padding: 15,
-  },
+  container: { flex: 1, backgroundColor: "#0d0d0d", padding: 15 },
+
   center: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "#0d0d0d",
   },
-  headerContainer: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 15,
-    alignItems: "center",
-  },
-  header: {
-    fontSize: 16,
+
+  title: {
     color: "#00e5ff",
+    fontSize: 18,
     fontWeight: "bold",
+    marginBottom: 20,
   },
-  pdfButton: {
-    flexDirection: "row",
-    backgroundColor: "#d50000",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    alignItems: "center",
-  },
-  pdfText: {
-    color: "#fff",
-    marginLeft: 6,
-    fontSize: 12,
-  },
-  card: {
-    backgroundColor: "#1c1c1c",
-    padding: 15,
-    borderRadius: 12,
-    marginBottom: 15,
-  },
-  sectionTitle: {
-    color: "#fff",
-    fontSize: 14,
-    marginBottom: 12,
-    fontWeight: "600",
-  },
+
   row: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 12,
+    marginBottom: 25,
   },
-  rowBetween: {
+
+  gaugeBox: { width: "48%", alignItems: "center" },
+
+  gaugeValue: {
+    color: "#fff",
+    fontSize: 20,
+    fontWeight: "bold",
+  },
+
+  gaugeLabel: { color: "#aaa", fontSize: 12 },
+
+  card: {
+    backgroundColor: "#1a1a1a",
+    padding: 16,
+    borderRadius: 14,
+    marginBottom: 18,
+  },
+
+  cardTitle: {
+    color: "#fff",
+    marginBottom: 10,
+    fontWeight: "600",
+  },
+
+  metricRow: {
     flexDirection: "row",
     justifyContent: "space-between",
+    marginBottom: 8,
   },
-  rowCenter: {
-    alignItems: "center",
-  },
-  metricBox: {
-    backgroundColor: "#2a2a2a",
-    padding: 12,
-    borderRadius: 10,
-    width: "48%",
-    alignItems: "center",
-  },
-  metricLabel: {
-    color: "#aaa",
+
+  metricLabel: { color: "#aaa", marginLeft: 6 },
+
+  metricValue: { color: "#fff", fontWeight: "bold" },
+
+  axisLabel: {
+    color: "#888",
     fontSize: 11,
-    marginTop: 4,
+    marginBottom: 8,
   },
-  metricValue: {
+
+  pdfButton: {
+    flexDirection: "row",
+    backgroundColor: "#ff1744",
+    paddingVertical: 8,
+    paddingHorizontal: 18,
+    borderRadius: 20,
+    alignSelf: "center",
+    marginBottom: 40,
+  },
+
+  pdfText: {
     color: "#fff",
-    fontSize: 15,
+    marginLeft: 6,
     fontWeight: "bold",
-    marginTop: 4,
-  },
-  metricFull: {
-    alignItems: "center",
-    width: "48%",
-  },
-  bigValue: {
-    fontSize: 26,
-    fontWeight: "bold",
-  },
-  label: {
-    color: "#aaa",
-    fontSize: 12,
-    marginTop: 4,
-  },
-  magneticValue: {
-    color: "#fff",
-    fontSize: 22,
-    fontWeight: "bold",
-    marginTop: 6,
   },
 });
