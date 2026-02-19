@@ -21,6 +21,12 @@ export default function App() {
   const [data, setData] = useState<any>(null);
   const [temperatura, setTemperatura] = useState<number>(0);
 
+  /* ========= FORMATADOR GLOBAL ========= */
+  const format = (value: number, decimals = 2) => {
+    if (value === null || value === undefined || isNaN(value)) return "0";
+    return Number(value).toFixed(decimals);
+  };
+
   useEffect(() => {
     const client = mqtt.connect(MQTT_URL);
 
@@ -57,7 +63,7 @@ export default function App() {
       </View>
     );
 
-  /* ================= EXTRAÇÃO SEGURA ================= */
+  /* ========= EXTRAÇÃO ========= */
 
   const rpm = data?.device_info?.rpm ?? 0;
   const rms = data?.time_domain?.rms ?? 0;
@@ -76,7 +82,7 @@ export default function App() {
   const freqs = data?.spectrum?.frequencies_hz ?? [];
   const amps = data?.spectrum?.amplitudes ?? [];
 
-  /* ================= CORES ================= */
+  /* ========= CORES ========= */
 
   const healthColor =
     health > 80 ? "#00e676" : health > 60 ? "#ffb300" : "#ff1744";
@@ -84,21 +90,21 @@ export default function App() {
   const tempColor =
     temperatura < 50 ? "#00e676" : temperatura < 70 ? "#ffb300" : "#ff1744";
 
-  /* ================= RELATÓRIO ================= */
+  /* ========= RELATÓRIO ========= */
 
   const gerarRelatorio = async () => {
     const html = `
       <h1>Relatório Motor</h1>
-      <p>RPM: ${rpm}</p>
-      <p>Temperatura: ${temperatura.toFixed(1)}°C</p>
-      <p>RMS: ${rms}</p>
-      <p>Pico: ${peak}</p>
-      <p>Saúde: ${health}%</p>
-      <p>1xRPM: ${amp1x}</p>
-      <p>2xRPM: ${amp2x}</p>
-      <p>3xRPM: ${amp3x}</p>
-      <p>BPFO: ${bpfo}</p>
-      <p>BPFI: ${bpfi}</p>
+      <p>RPM: ${format(rpm, 0)}</p>
+      <p>Temperatura: ${format(temperatura, 1)} °C</p>
+      <p>RMS: ${format(rms, 4)}</p>
+      <p>Pico: ${format(peak, 4)}</p>
+      <p>Saúde: ${format(health, 0)} %</p>
+      <p>1xRPM: ${format(amp1x, 3)}</p>
+      <p>2xRPM: ${format(amp2x, 3)}</p>
+      <p>3xRPM: ${format(amp3x, 3)}</p>
+      <p>BPFO: ${format(bpfo, 2)}</p>
+      <p>BPFI: ${format(bpfi, 2)}</p>
     `;
 
     const { uri } = await Print.printToFileAsync({ html });
@@ -111,15 +117,17 @@ export default function App() {
     decimalPlaces: 4,
     color: () => "#00e5ff",
     labelColor: () => "#aaa",
+    propsForBackgroundLines: {
+      strokeWidth: 0,
+    },
   };
 
   return (
     <ScrollView style={styles.container}>
       <Text style={styles.title}>🏭 PAINEL INDUSTRIAL PCM</Text>
 
-      {/* ================= GAUGES ================= */}
+      {/* ========= GAUGES ========= */}
       <View style={styles.row}>
-        {/* SAÚDE */}
         <View style={styles.gaugeBox}>
           <AnimatedCircularProgress
             size={130}
@@ -131,14 +139,13 @@ export default function App() {
             {() => (
               <View style={{ alignItems: "center" }}>
                 <Icon name="heart-pulse" size={26} color={healthColor} />
-                <Text style={styles.gaugeValue}>{health.toFixed(0)}%</Text>
+                <Text style={styles.gaugeValue}>{format(health, 0)}%</Text>
                 <Text style={styles.gaugeLabel}>Saúde</Text>
               </View>
             )}
           </AnimatedCircularProgress>
         </View>
 
-        {/* TEMPERATURA */}
         <View style={styles.gaugeBox}>
           <AnimatedCircularProgress
             size={130}
@@ -151,7 +158,7 @@ export default function App() {
               <View style={{ alignItems: "center" }}>
                 <Icon name="thermometer" size={26} color={tempColor} />
                 <Text style={styles.gaugeValue}>
-                  {temperatura.toFixed(1)}°C
+                  {format(temperatura, 1)}°C
                 </Text>
                 <Text style={styles.gaugeLabel}>Temperatura</Text>
               </View>
@@ -160,37 +167,53 @@ export default function App() {
         </View>
       </View>
 
-      {/* ================= MÉTRICAS ================= */}
+      {/* ========= MÉTRICAS ========= */}
       <Card title="📈 Vibração">
-        <Metric icon="waveform" label="RMS" value={rms.toFixed(5)} />
-        <Metric icon="arrow-up-bold" label="Pico" value={peak.toFixed(5)} />
+        <Metric icon="waveform" label="RMS" value={format(rms, 4)} />
+        <Metric icon="arrow-up-bold" label="Pico" value={format(peak, 4)} />
       </Card>
 
       <Card title="📡 Frequência">
         <Metric
           icon="chart-line"
           label="Freq Dominante"
-          value={`${dominantFreq.toFixed(2)} Hz`}
+          value={`${format(dominantFreq, 1)} Hz`}
         />
         <Metric
           icon="compass"
           label="Desvio Magnético"
-          value={headingStd.toFixed(3)}
+          value={format(headingStd, 2)}
         />
       </Card>
 
       <Card title="⚙ Harmônicas">
-        <Metric icon="numeric-1-circle" label="1x RPM" value={amp1x} />
-        <Metric icon="numeric-2-circle" label="2x RPM" value={amp2x} />
-        <Metric icon="numeric-3-circle" label="3x RPM" value={amp3x} />
+        <Metric
+          icon="numeric-1-circle"
+          label="1x RPM"
+          value={format(amp1x, 3)}
+        />
+        <Metric
+          icon="numeric-2-circle"
+          label="2x RPM"
+          value={format(amp2x, 3)}
+        />
+        <Metric
+          icon="numeric-3-circle"
+          label="3x RPM"
+          value={format(amp3x, 3)}
+        />
       </Card>
 
       <Card title="🔎 Rolamentos">
-        <Metric icon="alpha-b-circle" label="BPFO" value={bpfo} />
-        <Metric icon="alpha-b-circle-outline" label="BPFI" value={bpfi} />
+        <Metric icon="alpha-b-circle" label="BPFO" value={format(bpfo, 2)} />
+        <Metric
+          icon="alpha-b-circle-outline"
+          label="BPFI"
+          value={format(bpfi, 2)}
+        />
       </Card>
 
-      {/* ================= FFT ================= */}
+      {/* ========= FFT ========= */}
       <Card title="📊 Spectrum FFT">
         <Text style={styles.axisLabel}>
           Eixo X → Frequência (Hz) | Eixo Y → Amplitude
@@ -201,18 +224,23 @@ export default function App() {
             data={{
               labels: freqs
                 .filter((_, i) => i % 8 === 0)
-                .map((f: number) => f.toFixed(0)),
+                .map((f: number) => format(f, 0)),
               datasets: [{ data: amps }],
             }}
             width={screenWidth - 40}
             height={250}
             chartConfig={chartConfig}
             withDots={false}
+            withInnerLines={false}
+            withOuterLines={false}
+            withVerticalLines={false}
+            withHorizontalLines={false}
+            bezier
           />
         )}
       </Card>
 
-      {/* ================= BOTÃO ================= */}
+      {/* ========= BOTÃO ========= */}
       <TouchableOpacity style={styles.pdfButton} onPress={gerarRelatorio}>
         <Icon name="file-pdf-box" size={18} color="#fff" />
         <Text style={styles.pdfText}>Relatório</Text>
@@ -221,7 +249,7 @@ export default function App() {
   );
 }
 
-/* ================= COMPONENTES ================= */
+/* ========= COMPONENTES ========= */
 
 const Card = ({ title, children }: any) => (
   <View style={styles.card}>
@@ -240,70 +268,45 @@ const Metric = ({ icon, label, value }: any) => (
   </View>
 );
 
-/* ================= ESTILO ================= */
+/* ========= ESTILOS ========= */
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#0d0d0d", padding: 15 },
-
   center: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "#0d0d0d",
   },
-
   title: {
     color: "#00e5ff",
     fontSize: 18,
     fontWeight: "bold",
     marginBottom: 20,
   },
-
   row: {
     flexDirection: "row",
     justifyContent: "space-between",
     marginBottom: 25,
   },
-
   gaugeBox: { width: "48%", alignItems: "center" },
-
-  gaugeValue: {
-    color: "#fff",
-    fontSize: 20,
-    fontWeight: "bold",
-  },
-
+  gaugeValue: { color: "#fff", fontSize: 20, fontWeight: "bold" },
   gaugeLabel: { color: "#aaa", fontSize: 12 },
-
   card: {
     backgroundColor: "#1a1a1a",
     padding: 16,
     borderRadius: 14,
     marginBottom: 18,
   },
-
-  cardTitle: {
-    color: "#fff",
-    marginBottom: 10,
-    fontWeight: "600",
-  },
-
+  cardTitle: { color: "#fff", marginBottom: 10, fontWeight: "600" },
   metricRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     marginBottom: 8,
   },
-
   metricLabel: { color: "#aaa", marginLeft: 6 },
-
   metricValue: { color: "#fff", fontWeight: "bold" },
-
-  axisLabel: {
-    color: "#888",
-    fontSize: 11,
-    marginBottom: 8,
-  },
-
+  axisLabel: { color: "#888", fontSize: 11, marginBottom: 8 },
   pdfButton: {
     flexDirection: "row",
     backgroundColor: "#ff1744",
@@ -313,10 +316,5 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     marginBottom: 40,
   },
-
-  pdfText: {
-    color: "#fff",
-    marginLeft: 6,
-    fontWeight: "bold",
-  },
+  pdfText: { color: "#fff", marginLeft: 6, fontWeight: "bold" },
 });
