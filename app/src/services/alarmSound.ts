@@ -8,7 +8,7 @@ export async function startAlarm() {
   if (sound) return;
 
   sound = new Audio.Sound();
-  await sound.loadAsync(require("../../assets/alarm.mp3"), {
+  await sound.loadAsync(require("../../assets/alerta.mp3"), {
     isLooping: true,
     volume: 1,
   });
